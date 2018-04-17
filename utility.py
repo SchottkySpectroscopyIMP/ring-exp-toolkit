@@ -189,5 +189,5 @@ class Utility(object):
 
 if __name__ == "__main__":
     utility = Utility(242.9, 500)
-    utility.set_ion("58Ni39")
+    utility.set_ion("58Ni19")
     utility.set_energy(143.92)
