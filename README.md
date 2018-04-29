@@ -20,9 +20,10 @@ Make sure the following requirements are fulfilled.
 
 ### Prerequisites
  - `Python 3`
- - `Numpy`, `Pandas`, `IPython`/`Jupyter` (_optional_)
+ - `Numpy`, `Pandas`
  - [atomic mass database](http://amdc.in2p3.fr/masstables/Ame2016/mass16.txt) `mass16.txt`
  - [atomic half-life database](http://amdc.in2p3.fr/nubase/nubase2016.txt) `nubase2016.txt`
+ - `IPython`/`Jupyter` (_optional_)
  - `LISE++` simulation files (_only if ion identification is needed_)
 
 To run the code, launch a `IPython` session or a `Jupyter` notebook and import the scripts as packages.
@@ -43,7 +44,7 @@ iid = _iid.IID("58Ni28.lpp", 242.9, 500) # LISE++ simulation file, center freque
 iid.calibrate_peak_loc("58Ni28", -140, 161) # identified ion, peak location in kHz within the frequency window, harmonic
 ```
 
-For figure-assisted tutorials, see [`Wiki`](https://github.com/SchottkySpectroscopyIMP/ring-exp-toolkit/wiki).
+For figure-assisted tutorials, see [Wiki](https://github.com/SchottkySpectroscopyIMP/ring-exp-toolkit/wiki).
 
 ## License
 This repository is licensed under the **GNU GPLv3**.
