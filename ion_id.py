@@ -133,7 +133,8 @@ class IID(Utility):
                 i += 1
         candidate = self.fragment.iloc[index]
         candidate.index = np.arange(candidate.index.size)
-        frequency = pd.DataFrame.from_items([("HalfLife", half_life), ("RevFreq", rev_freq), ("PeakLoc", peak_loc), ("Harmonic", harmonic)])
+        #frequency = pd.DataFrame.from_items([("HalfLife", half_life), ("RevFreq", rev_freq), ("PeakLoc", peak_loc), ("Harmonic", harmonic)])
+        frequency = pd.DataFrame.from_dict({"HalfLife": half_life, "RevFreq": rev_freq, "PeakLoc": peak_loc, "Harmonic": harmonic})
         self.peak = pd.concat([candidate, frequency], axis=1)
         self.show()
 
