@@ -187,23 +187,26 @@ class IID(Utility):
         find_result = self.peak.set_index("Ion")
         find_result = find_result[~find_result.index.duplicated()].filter(like=ion, axis=0)
         find_result = find_result.reset_index()
-        print('-' * 16)
-        print("center frequency\t{:g} MHz".format(self.cen_freq))
-        print("span\t\t\t{:g} kHz".format(self.span))
-        print("orbital length\t\t{:g} m".format(self.L_CSRe))
-        print("Bρ\t\t\t{:.6g} Tm\n".format(self.Brho))
-        print(find_result.head(self.n_peak).to_string(index=False, justify="left",
-            columns=["Weight", "Ion", "HalfLife", "Yield", "RevFreq", "PeakLoc", "Harmonic"],
-            header=["Weight", " Ion", " Half-life", "Yield", "Rev.Freq.", "PeakLoc.", "Harmonic"],
-            formatters=[
-                lambda x: "{:<8.2e}".format(x),
-                lambda x: "{:<7s}".format(x),
-                lambda x: "{:<11s}".format(x),
-                lambda x: "{:<9.2e}".format(x),
-                lambda x: "{:<8.6f}".format(x),
-                lambda x: "{:< 4.0f}".format(x),
-                lambda x: "{:<3d}".format(x),
-                ] ))
+        if find_result.empty:
+            print("No valid ion!")
+        else:
+            print('-' * 16)
+            print("center frequency\t{:g} MHz".format(self.cen_freq))
+            print("span\t\t\t{:g} kHz".format(self.span))
+            print("orbital length\t\t{:g} m".format(self.L_CSRe))
+            print("Bρ\t\t\t{:.6g} Tm\n".format(self.Brho))
+            print(find_result.head(self.n_peak).to_string(index=False, justify="left",
+                columns=["Weight", "Ion", "HalfLife", "Yield", "RevFreq", "PeakLoc", "Harmonic"],
+                header=["Weight", " Ion", " Half-life", "Yield", "Rev.Freq.", "PeakLoc.", "Harmonic"],
+                formatters=[
+                    lambda x: "{:<8.2e}".format(x),
+                    lambda x: "{:<7s}".format(x),
+                    lambda x: "{:<11s}".format(x),
+                    lambda x: "{:<9.2e}".format(x),
+                    lambda x: "{:<8.6f}".format(x),
+                    lambda x: "{:< 4.0f}".format(x),
+                    lambda x: "{:<3d}".format(x),
+                    ] ))
         
 
 
