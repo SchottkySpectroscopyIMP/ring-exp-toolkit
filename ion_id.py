@@ -4,6 +4,7 @@
 import io, re
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from utility import Utility
 
 class IID(Utility):
@@ -133,7 +134,6 @@ class IID(Utility):
                 i += 1
         candidate = self.fragment.iloc[index]
         candidate.index = np.arange(candidate.index.size)
-        #frequency = pd.DataFrame.from_items([("HalfLife", half_life), ("RevFreq", rev_freq), ("PeakLoc", peak_loc), ("Harmonic", harmonic)])
         frequency = pd.DataFrame.from_dict({"HalfLife": half_life, "RevFreq": rev_freq, "PeakLoc": peak_loc, "Harmonic": harmonic})
         self.peak = pd.concat([candidate, frequency], axis=1)
         self.show()
@@ -162,6 +162,49 @@ class IID(Utility):
                 lambda x: "{:< 4.0f}".format(x),
                 lambda x: "{:<3d}".format(x),
                 ] ))
+
+    def plot(self, display_num=10):
+        '''
+        plot the most prominent peaks in a Schottky spectrum
+        '''
+        self.update_n_peak(display_num) if display_num != -1 else self.update_n_peak(len(self.peak["Weight"]))
+        print("total number of ions: {:}".format(len(self.peak["Weight"])))
+        print("number of displayed ions: {:}".format(display_num)) if display_num != -1 else print("number of displayed ions: {:}".format(len(self.peak["Weight"])))
+        peak_sort = self.peak.reset_index(drop=True)
+        (markerline, stemlines, baseline) = plt.stem(peak_sort["PeakLoc"][:display_num], np.log10(peak_sort["Weight"][:display_num]), markerfmt='g.')
+        plt.setp(baseline, color='grey', linewidth=1)
+        plt.setp(stemlines, color='olive', linewidth=0.5)
+        for i, ion in enumerate(peak_sort["Ion"][:display_num]):
+            plt.text(peak_sort["PeakLoc"][i], np.log10(peak_sort["Weight"][i])+0.3, ion, fontsize=9)
+        plt.xlabel("center frequency {:} [MHz]\nreference frequency [kHz]".format(self.cen_freq))
+        plt.ylabel("Weight (log10)")
+        plt.show()
+
+    def find_ion(self, ion):
+        '''
+        show the information of the selected ion
+        '''
+        find_result = self.peak.set_index("Ion")
+        find_result = find_result[~find_result.index.duplicated()].filter(like=ion, axis=0)
+        find_result = find_result.reset_index()
+        print('-' * 16)
+        print("center frequency\t{:g} MHz".format(self.cen_freq))
+        print("span\t\t\t{:g} kHz".format(self.span))
+        print("orbital length\t\t{:g} m".format(self.L_CSRe))
+        print("Bρ\t\t\t{:.6g} Tm\n".format(self.Brho))
+        print(find_result.head(self.n_peak).to_string(index=False, justify="left",
+            columns=["Weight", "Ion", "HalfLife", "Yield", "RevFreq", "PeakLoc", "Harmonic"],
+            header=["Weight", " Ion", " Half-life", "Yield", "Rev.Freq.", "PeakLoc.", "Harmonic"],
+            formatters=[
+                lambda x: "{:<8.2e}".format(x),
+                lambda x: "{:<7s}".format(x),
+                lambda x: "{:<11s}".format(x),
+                lambda x: "{:<9.2e}".format(x),
+                lambda x: "{:<8.6f}".format(x),
+                lambda x: "{:< 4.0f}".format(x),
+                lambda x: "{:<3d}".format(x),
+                ] ))
+        
 
 
 if __name__ == "__main__":
