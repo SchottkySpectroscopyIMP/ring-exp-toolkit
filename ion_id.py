@@ -163,9 +163,9 @@ class IID(Utility):
                 lambda x: "{:<3d}".format(x),
                 ] ))
 
-    def plot(self, display_num=10):
+    def plot_delta(self, display_num=10):
         '''
-        plot the most prominent peaks in a Schottky spectrum
+        plot the most prominent peaks (delta) in a Schottky spectrum
         '''
         self.update_n_peak(display_num) if display_num != -1 else self.update_n_peak(len(self.peak["Weight"]))
         print("total number of ions: {:}".format(len(self.peak["Weight"])))
@@ -180,14 +180,52 @@ class IID(Utility):
         plt.ylabel("Weight (log10)")
         plt.show()
 
+    def plot_gaussian(self, display_ion=""):
+        '''
+        plot the most prominent peaks (gauss) in a Schottky spectrum
+        FWHM = df/f = 2*Sqrt(2*ln(2))  # using guassian
+        FWHM = 1.0E-05                 # from the Schottky test result
+        '''
+        peak_sort = self.peak.reset_index(drop=True)
+        frequency_range = np.arange(-self.span/2,self.span/2,0.01)
+        sigma = 1E-02 / ( 2 * np.sqrt(2*np.log10(2) ))
+        peak_sort["PeakFunc"] = np.log10(peak_sort["Weight"]) * 1 / (np.sqrt(2*np.pi) * sigma) * peak_sort["PeakLoc"].apply(lambda x: np.exp(-(np.arange(-self.span/2,self.span/2,0.01) - x)**2 / (2 * sigma**2)))
+        peaks_sum = peak_sort["PeakFunc"].sum()
+        self.find_ion(display_ion)
+        if display_ion == "" or self.find_result.empty:
+            print("mark the primary beam instead.")
+            self.update_n_peak(len(self.peak["Weight"]))
+            print("total number of ions: {:}".format(len(self.peak["Weight"])))
+            peaks_one = np.log10(self.peak["Weight"][0]) * 1 / (np.sqrt(2*np.pi) * sigma) * np.exp(-(frequency_range - self.peak["PeakLoc"][0])**2 / (2 * sigma**2))
+            plt.plot(frequency_range, peaks_sum, color='blue')
+            plt.plot(frequency_range,peaks_one, color='red')
+            for i, ion in enumerate(peak_sort["Ion"]):
+                plt.text(peak_sort["PeakLoc"][i], np.log10(peak_sort["Weight"][i])*1/(np.sqrt(2*np.pi)*sigma)+1, ion, fontsize=9)
+            plt.text(self.peak["PeakLoc"][0], np.log10(self.peak["Weight"][0])*1/(np.sqrt(2*np.pi)*sigma)+1, self.peak["Ion"][0], fontsize=9, color='red')
+        else:
+            plt.plot(frequency_range, peaks_sum, color='blue')
+            for i, ion in enumerate(peak_sort["Ion"]):
+                plt.text(peak_sort["PeakLoc"][i], np.log10(peak_sort["Weight"][i])*1/(np.sqrt(2*np.pi)*sigma)+1, ion, fontsize=9)
+            for i, ion in enumerate(self.find_result["Ion"]):
+                plt.plot(frequency_range, np.log10(self.find_result["Weight"][i]) * 1 / (np.sqrt(2*np.pi) * sigma) * np.exp(-(frequency_range - self.find_result["PeakLoc"][i])**2 / (2 * sigma**2)), color='red')
+                plt.text(self.find_result["PeakLoc"][i], np.log10(self.find_result["Weight"][i])*1/(np.sqrt(2*np.pi)*sigma)+1, ion, fontsize=9, color='red')
+        plt.xlim((-self.span/2,self.span/2))
+        plt.ylim(bottom=0)
+        plt.xlabel("center frequency {:} [MHz]\nreference frequency [kHz]".format(self.cen_freq))
+        plt.ylabel("Weight (log10)")
+        plt.show()
+
     def find_ion(self, ion):
         '''
         show the information of the selected ion
         '''
-        find_result = self.peak.set_index("Ion")
-        find_result = find_result[~find_result.index.duplicated()].filter(like=ion, axis=0)
-        find_result = find_result.reset_index()
-        if find_result.empty:
+        if ion == "":
+            print("No input!")
+            return
+        self.find_result = self.peak.set_index("Ion")
+        self.find_result = self.find_result[~self.find_result.index.duplicated()].filter(like=ion, axis=0)
+        self.find_result = self.find_result.reset_index()
+        if self.find_result.empty:
             print("No valid ion!")
         else:
             print('-' * 16)
@@ -195,7 +233,7 @@ class IID(Utility):
             print("span\t\t\t{:g} kHz".format(self.span))
             print("orbital length\t\t{:g} m".format(self.L_CSRe))
             print("Bρ\t\t\t{:.6g} Tm\n".format(self.Brho))
-            print(find_result.head(self.n_peak).to_string(index=False, justify="left",
+            print(self.find_result.head(self.n_peak).to_string(index=False, justify="left",
                 columns=["Weight", "Ion", "HalfLife", "Yield", "RevFreq", "PeakLoc", "Harmonic"],
                 header=["Weight", " Ion", " Half-life", "Yield", "Rev.Freq.", "PeakLoc.", "Harmonic"],
                 formatters=[
