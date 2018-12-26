@@ -29,6 +29,7 @@ class IID(Utility):
         L_CSRe:     circumference of CSRe in m, default value 128.8
         '''
         self.n_peak = n_peak
+        self.sigma = 5.0E-06 / 5.0
         super().__init__(cen_freq, span, L_CSRe, verbose)
         try:
             self.nucl_life = pd.read_csv("nuclear_half_lives.csv", na_filter=False)
@@ -104,9 +105,9 @@ class IID(Utility):
         '''
         if element_input == "": # show the highest Weight ion
             return re.sub("[^A-Za-z]", "", self.peak["Ion"][0]), self.peak
-        self.isotopes_result = self.peak.set_index("Ion")
-        self.isotopes_result = self.isotopes_result[~self.isotopes_result.index.duplicated()].filter(like=element_input, axis=0)
-        self.isotopes_result = self.isotopes_result.reset_index()
+        self.isotopes_result = self.peak_sort.copy()
+        self.isotopes_result = self.isotopes_result[self.isotopes_result["Ion"].str.contains(r"\d+" + element_input + "+\d")]
+        self.isotopes_result = self.isotopes_result.reset_index(drop=True)
         if self.isotopes_result.empty:
             return "", pd.DataFrame(columns=['Ion', 'Yield', 'HalfLife', 'Harmonic', 'PeakLoc', 'RevFreq', 'Weight'])
         else:
@@ -116,8 +117,8 @@ class IID(Utility):
         '''
         show the information of the selected ion peak
         '''
-        ion_result = self.peak.copy()
-        ion_result = ion_result[np.abs(ion_result.PeakLoc-peakLoc_input) <= 10]
+        ion_result = self.peak
+        ion_result = ion_result[np.abs(ion_result.PeakLoc-peakLoc_input) <= (self.sigma*self.cen_freq*1E-03)/2]
         ion_result = ion_result.reset_index(drop=True)
         return ion_result
 
@@ -126,13 +127,18 @@ class IID(Utility):
         return the data for the gaussian peaks of all the ions, and the data for the gaussian peaks of the selected element
         buttom_width = 5 * sigma   # using gaussian
         '''
-        peak_sort = self.peak.copy()
+        self.peak_sort = self.peak.copy()
         frequency_range = np.arange(-self.span/2, self.span/2, 0.01)
-        sigma = 5.0E-03 / 5.0
+        lim = np.max(self.peak_sort["Weight"]) / 1.0E+5
         def formFunc(row_Weight, row_PeakLoc):
-            return row_Weight / (np.sqrt(2*np.pi) * sigma*np.abs(row_PeakLoc)) * np.exp(-(frequency_range - row_PeakLoc)**2 / (2 * (sigma*row_PeakLoc)**2))
-        peak_sort["PeakFunc"] = peak_sort.apply(lambda row: formFunc(row['Weight'], row['PeakLoc']), axis=1)
-        peak_sum = peak_sort["PeakFunc"].sum()
+            a = row_Weight / (np.sqrt(2*np.pi) * self.sigma*(self.cen_freq * 1.0E+03 + row_PeakLoc)) * np.exp(-(frequency_range - row_PeakLoc)**2 / (2 * (self.sigma * (self.cen_freq * 1.0E+03 + row_PeakLoc))**2))
+            a[a < lim] = lim
+            return a
+            #return row_Weight / (np.sqrt(2*np.pi) * self.sigma*(self.cen_freq * 1.0E+03 + row_PeakLoc)) * np.exp(-(frequency_range - row_PeakLoc)**2 / (2 * (self.sigma * (self.cen_freq * 1.0E+03 + row_PeakLoc))**2))
+        self.peak_sort["PeakFunc"] = self.peak_sort.apply(lambda row: formFunc(row['Weight'], row['PeakLoc']), axis=1)
+        peak_sum = self.peak_sort["PeakFunc"].sum()
+        #peak_sum[peak_sum< 10**(int(np.log10(np.max(peak_sum)))-9)] = 10**(int(np.log10(np.max(peak_sum)))-9)
+        #peak_sum = np.log10(peak_sum)
         isotopes_list = []
         element, isotopes = self.find_isotopes(display_ion)
         if element == "":
@@ -140,8 +146,7 @@ class IID(Utility):
             message = "1"
         else:
             message = "0"
-        for i, ion in enumerate(isotopes["Ion"]):
-            isotopes_list.append(isotopes["Weight"][i] / (np.sqrt(2*np.pi) * sigma * np.abs(isotopes["PeakLoc"][i])) * np.exp(-(frequency_range - isotopes["PeakLoc"][i])**2 / (2 * (sigma*isotopes["PeakLoc"][i])**2)))
+        isotopes_list = list(isotopes['PeakFunc'])
         return message, frequency_range, peak_sum, isotopes_list
 
 
@@ -159,7 +164,7 @@ class IID_MainWindow(QMainWindow):
         self.height = 600
 
         # the default parameter setting
-        self.directory = "/home/qwang/nuclear-chart/"
+        self.directory = "./"
         self.cen_freq = 242.5 # MHz
         self.span = 1000 # kHz
 
@@ -265,7 +270,7 @@ class IID_MainWindow(QMainWindow):
         self.win = pg.GraphicsLayoutWidget()
         self.spectrum = self.win.addPlot(title="Simulation of the Schottky spectrum")
         self.spectrum.setLogMode(False,True)
-        self.spectrum.setYRange(-2, 10)
+        #self.spectrum.setYRange(-2, 10)
 
         # marker of the ions in spectrum
         self.crosshair_v = pg.InfiniteLine(pos=0, angle=90, pen=self.fgcolor)
@@ -328,7 +333,7 @@ class IID_MainWindow(QMainWindow):
                     self.crosshair_v.setValue(0)
                     if self.ion == "":
                         self.statusBar().showMessage("No valid ion input!")
-                    self.QTable_setModel(self.peak_list, self.IonTable)
+                    self.QTable_setModel(self.peak_list.drop(columns='PeakFunc'), self.IonTable)
                     self.IonInput.setText(self.ion)
                 worker = Worker(data_flash_worker)
                 worker.signals.finished.connect(data_flash_ready)
