@@ -104,12 +104,15 @@ class IID(Utility):
         show the all isotopes' information of the selected element
         '''
         if element_input == "": # show the highest Weight ion
-            return re.sub("[^A-Za-z]", "", self.peak["Ion"][0]), self.peak
+            try:
+                return re.sub("[^A-Za-z]", "", self.peak_sort["Ion"][0]), self.peak_sort
+            except:
+                return re.sub("[^A-Za-z]", "", self.peak["Ion"][0]), self.peak
         self.isotopes_result = self.peak_sort.copy()
         self.isotopes_result = self.isotopes_result[self.isotopes_result["Ion"].str.contains(r"\d+" + element_input + "+\d")]
         self.isotopes_result = self.isotopes_result.reset_index(drop=True)
         if self.isotopes_result.empty:
-            return "", pd.DataFrame(columns=['Ion', 'Yield', 'HalfLife', 'Harmonic', 'PeakLoc', 'RevFreq', 'Weight'])
+            return element_input, pd.DataFrame(columns=['Ion', 'Yield', 'HalfLife', 'Harmonic', 'PeakLoc', 'RevFreq', 'Weight'])
         else:
             return re.sub("[^A-Za-z]", "", self.isotopes_result["Ion"][0]), self.isotopes_result
 
@@ -137,16 +140,13 @@ class IID(Utility):
             #return row_Weight / (np.sqrt(2*np.pi) * self.sigma*(self.cen_freq * 1.0E+03 + row_PeakLoc)) * np.exp(-(frequency_range - row_PeakLoc)**2 / (2 * (self.sigma * (self.cen_freq * 1.0E+03 + row_PeakLoc))**2))
         self.peak_sort["PeakFunc"] = self.peak_sort.apply(lambda row: formFunc(row['Weight'], row['PeakLoc']), axis=1)
         peak_sum = self.peak_sort["PeakFunc"].sum()
-        #peak_sum[peak_sum< 10**(int(np.log10(np.max(peak_sum)))-9)] = 10**(int(np.log10(np.max(peak_sum)))-9)
-        #peak_sum = np.log10(peak_sum)
         isotopes_list = []
         element, isotopes = self.find_isotopes(display_ion)
-        if element == "":
-            element, isotopes = self.find_isotopes("")
+        if isotopes.empty:
             message = "1"
         else:
             message = "0"
-        isotopes_list = list(isotopes['PeakFunc'])
+            isotopes_list = list(isotopes['PeakFunc'])
         return message, frequency_range, peak_sum, isotopes_list
 
 
@@ -327,13 +327,21 @@ class IID_MainWindow(QMainWindow):
                     self.ion, self.peak_list = self.FileWork.find_isotopes(self.IonInput.text())
                     self.message, self.frequency_range, self.peak_sum, self.isotopes_list = self.FileWork.gaussian_peak(self.ion)
                 def data_flash_ready():
+                    self.spectrum.clear()
                     self.spectrum.plot(self.frequency_range, self.peak_sum, pen=pg.mkPen(color=self.green, width=2))
-                    for isotope in self.isotopes_list:
-                        self.spectrum.plot(self.frequency_range, isotope, pen=pg.mkPen(color=self.orange, width=2))
+                    try:
+                        for isotope in self.isotopes_list:
+                            self.spectrum.plot(self.frequency_range, isotope, pen=pg.mkPen(color=self.orange, width=2))
+                    except:
+                        pass
+                    self.spectrum.addItem(self.crosshair_v, ignoreBounds=True)
                     self.crosshair_v.setValue(0)
                     if self.ion == "":
                         self.statusBar().showMessage("No valid ion input!")
-                    self.QTable_setModel(self.peak_list.drop(columns='PeakFunc'), self.IonTable)
+                    try:
+                        self.QTable_setModel(self.peak_list.drop(columns='PeakFunc'), self.IonTable)
+                    except:
+                        self.QTable_setModel(self.peak_list, self.IonTable)
                     self.IonInput.setText(self.ion)
                 worker = Worker(data_flash_worker)
                 worker.signals.finished.connect(data_flash_ready)
