@@ -36,7 +36,8 @@ class IID(Utility):
             if self.verbose: print("nuclear half-lives loaded")
         except OSError:
             with io.StringIO() as buf:
-                for line in nubase:
+                with open("nubase2016.text") as nubase:
+                    for line in nubase:
                         if line[7] != '0':
                             continue
                         element = ''.join(c for c in line[11:16] if c.isalpha())
@@ -98,7 +99,19 @@ class IID(Utility):
         #self.peak.style.format({"Ion": "{:<7s}", "Yield": "{:<9.2e}", "HalfLife": "{:<11s}", "Harmonic": {:<3d}", "PeakLoc": "{:<4.0f}", "RevFreq": "{:<8.6f}", "Weight": "{:<8.2e}"})
         #print(self.peak)
         return self.peak
-    
+
+    def calibrate_peak_loc(self, ion, peak_loc, harmonic):
+        '''
+        using the measured peak location with the identified ion to calibrate the magnetic rigidity of CSRe
+        ion:        a string in the format of AElementQ, e.g. 3He2
+        peak_loc:   peak location in kHz after deduction of the center frequency
+        harmonic:   harmonic number
+        '''
+        self.set_ion(ion)
+        self.set_peak_loc(peak_loc, harmonic)
+        self.peak = self.calc_peak()
+        return self.peak
+
     def find_isotopes(self, element_input):
         '''
         show the all isotopes' information of the selected element
@@ -160,8 +173,8 @@ class IID_MainWindow(QMainWindow):
         self.title = "Ion Identification Interface"
         self.left = 100
         self.top = 30
-        self.width = 1500
-        self.height = 600
+        self.width = 760
+        self.height = 1000
 
         # the default parameter setting
         self.directory = "./"
@@ -262,8 +275,19 @@ class IID_MainWindow(QMainWindow):
         self.IonButton = QPushButton("Search", self)
         self.IonButton.setFont(self.fontLab)
 
+        # calibrate the ion
+        self.CalibrateIonInput = QLineEdit("e.g. 3H2",self)
+        self.CalibrateIonInput.setFont(self.fontProc)
+        self.CalibratePeakInput = QLineEdit("e.g. 113 [kHz]",self)
+        self.CalibratePeakInput.setFont(self.fontProc)
+        self.CalibrateHarmInput = QLineEdit("e.g. 151",self)
+        self.CalibrateHarmInput.setFont(self.fontProc)
+        self.CalibrateButton = QPushButton("Calibrate", self)
+        self.CalibrateButton.setFont(self.fontLab)
+
         # ion information list
         self.IonTable = QTableView(self)
+        self.IonTable.setSortingEnabled(True)
         self.QTable_setModel(pd.DataFrame(columns=['Ion', 'Yield', 'HalfLife', 'Harmonic', 'PeakLoc', 'RevFreq', 'Weight']), self.IonTable)
 
         # plot spectrum
@@ -279,31 +303,30 @@ class IID_MainWindow(QMainWindow):
         # set the Ion panel
         IonGrid = QGridLayout()
         IonGrid.setSpacing(5)
-        IonGrid.addWidget(self.vFileList, 0, 0, 5, 2)
-        IonGrid.addWidget(self.FileCheck, 0, 2, 1, 1)
-        IonGrid.addWidget(self.cenFreqLab, 1, 2, 1, 1)
-        IonGrid.addWidget(self.cenFreqInput, 2, 2, 1, 1)
-        IonGrid.addWidget(self.spanLab, 3, 2, 1, 1)
-        IonGrid.addWidget(self.spanInput, 4, 2, 1, 1)
+        IonGrid.addWidget(self.vFileList, 0, 0, 5, 3)
+        IonGrid.addWidget(self.FileCheck, 0, 3, 1, 2)
+        IonGrid.addWidget(self.cenFreqLab, 1, 3, 1, 2)
+        IonGrid.addWidget(self.cenFreqInput, 2, 3, 1, 2)
+        IonGrid.addWidget(self.spanLab, 3, 3, 1, 2)
+        IonGrid.addWidget(self.spanInput, 4, 3, 1, 2)
         IonGrid.addWidget(self.IonCheck, 5, 0, 1, 1)#, Qt.AlignHCenter)
         IonGrid.addWidget(self.IonInput, 5, 1, 1, 1)
         IonGrid.addWidget(self.IonButton, 5, 2, 1, 1)
+        IonGrid.addWidget(self.CalibrateButton, 0, 5, 1, 1)
+        IonGrid.addWidget(self.CalibrateIonInput, 2, 5, 1, 1)#, Qt.AlignHCenter)
+        IonGrid.addWidget(self.CalibratePeakInput, 3, 5, 1, 1)
+        IonGrid.addWidget(self.CalibrateHarmInput, 4, 5, 1, 1)
         self.IonPanel = QGroupBox()
         self.IonPanel.setStyleSheet("QGroupBox{border: 1px groove silver; margin: 1px; padding-top: 0}")
         self.IonPanel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         self.IonPanel.setLayout(IonGrid)        
 
         # set layout
-        windowLayout1 = QVBoxLayout()
-        windowLayout1.setSpacing(5)
-        windowLayout1.addWidget(self.IonPanel)
-        windowLayout1.addWidget(self.IonTable)
-        wid1 = QWidget()
-        wid1.setLayout(windowLayout1)
-        windowLayout = QHBoxLayout()
+        windowLayout = QVBoxLayout()
         windowLayout.setSpacing(5)
         windowLayout.addWidget(self.win)
-        windowLayout.addWidget(wid1)
+        windowLayout.addWidget(self.IonTable)
+        windowLayout.addWidget(self.IonPanel)
         wid = QWidget()
         self.setCentralWidget(wid)
         wid.setLayout(windowLayout)
@@ -318,13 +341,49 @@ class IID_MainWindow(QMainWindow):
                 self.QLineEdit_LockStyle(self.IonInput)
         self.IonCheck.stateChanged.connect(check_elementInput)
 
+        def button_ionCalibrate():
+            # print(self.peak_list['Ion'])
+            if self.CalibrateIonInput.text() == "" or self.CalibratePeakInput.text() == "" or self.CalibrateHarmInput.text()== "":
+                self.statusBar().showMessage("No valid input!")
+                return
+            if self.CalibrateIonInput.text() in self.peak_list['Ion'].values:
+                self.statusBar().showMessage("Calibrating ...")
+
+                def data_calibrate_worker():
+                    self.peak_list = self.FileWork.calibrate_peak_loc(self.CalibrateIonInput.text(), float(self.CalibratePeakInput.text()), int(self.CalibrateHarmInput.text()))
+                    self.ion = re.sub("[^A-Za-z]", "", self.peak_list["Ion"][0])
+                    self.message, self.frequency_range, self.peak_sum, self.isotopes_list = self.FileWork.gaussian_peak(self.ion)
+
+                def data_calibrate_ready():
+                    self.spectrum.clear()
+                    self.spectrum.plot(self.frequency_range, self.peak_sum, pen=pg.mkPen(self.green, width=2))
+                    for isotope in self.isotopes_list:
+                        self.spectrum.plot(self.frequency_range, isotope, pen=pg.mkPen(self.orange, width=2))
+                        #self.spectrum.showGrid(x=True, y=True)
+                    self.spectrum.addItem(self.crosshair_v, ignoreBounds=True)
+                    self.crosshair_v.setValue(0)
+                    self.QTable_setModel(self.peak_list, self.IonTable)
+                    self.IonInput.setText(self.ion)
+                    self.statusBar().showMessage("Data has been calibrated!")
+                    self.CalibrateIonInput.setText("e.g. 3H2")
+                    self.CalibratePeakInput.setText("e.g. 113 [kHz]")
+                    self.CalibrateHarmInput.setText("e.g. 151")
+        
+                worker = Worker(data_calibrate_worker)
+                worker.signals.finished.connect(data_calibrate_ready)
+                self.threadPool.start(worker) 
+            else:
+                self.statusBar().showMessage("no valid ion input!")
+                return 
+        self.CalibrateButton.clicked.connect(button_ionCalibrate)
+
         def button_elementSearch():
             if self.IonCheck.isChecked():
                 if self.IonInput.text() == "":
                     self.statusBar().showMessage("No ion input! Show the whole ion list instead.")
 
                 def data_flash_worker():
-                    self.ion, self.peak_list = self.FileWork.find_isotopes(self.IonInput.text())
+                    self.ion, self.peak_list_f = self.FileWork.find_isotopes(self.IonInput.text())
                     self.message, self.frequency_range, self.peak_sum, self.isotopes_list = self.FileWork.gaussian_peak(self.ion)
                 def data_flash_ready():
                     self.spectrum.clear()
@@ -339,9 +398,9 @@ class IID_MainWindow(QMainWindow):
                     if self.ion == "":
                         self.statusBar().showMessage("No valid ion input!")
                     try:
-                        self.QTable_setModel(self.peak_list.drop(columns='PeakFunc'), self.IonTable)
+                        self.QTable_setModel(self.peak_list_f.drop(columns='PeakFunc'), self.IonTable)
                     except:
-                        self.QTable_setModel(self.peak_list, self.IonTable)
+                        self.QTable_setModel(self.peak_list_f, self.IonTable)
                     self.IonInput.setText(self.ion)
                 worker = Worker(data_flash_worker)
                 worker.signals.finished.connect(data_flash_ready)
