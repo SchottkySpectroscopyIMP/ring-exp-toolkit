@@ -183,32 +183,41 @@ class IID(Utility):
     def plot_gaussian(self, display_ion=""):
         '''
         plot the most prominent peaks (gauss) in a Schottky spectrum
-        FWHM = df/f = 2*Sqrt(2*ln(2))  # using guassian
-        FWHM = 1.0E-05                 # from the Schottky test result
+        supposing
+        buttom_width = df = 5 * sigma
+        df/f = 5.0E-06                  # from the Schottky test result
         '''
         peak_sort = self.peak.reset_index(drop=True)
         frequency_range = np.arange(-self.span/2,self.span/2,0.01)
-        sigma = 1E-02 / ( 2 * np.sqrt(2*np.log10(2) ))
-        peak_sort["PeakFunc"] = np.log10(peak_sort["Weight"]) * 1 / (np.sqrt(2*np.pi) * sigma) * peak_sort["PeakLoc"].apply(lambda x: np.exp(-(np.arange(-self.span/2,self.span/2,0.01) - x)**2 / (2 * sigma**2)))
+        sigma = 5.0E-06 / 5.0
+        lim = np.max(peak_sort["Weight"]) / 1.0E+05
+        def formFunc(row_Weight, row_PeakLoc):
+            a = row_Weight / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + row_PeakLoc)) * np.exp(-(frequency_range - row_PeakLoc)**2 / (2 * (sigma * (self.cen_freq * 1.0E+03 + row_PeakLoc))**2))
+            a[a < lim] = lim
+            return a
+        peak_sort["PeakFunc"] = peak_sort.apply(lambda row: formFunc(row['Weight'], row['PeakLoc']), axis=1)
         peaks_sum = peak_sort["PeakFunc"].sum()
         self.find_ion(display_ion)
         if display_ion == "" or self.find_result.empty:
             print("mark the primary beam instead.")
             self.update_n_peak(len(self.peak["Weight"]))
             print("total number of ions: {:}".format(len(self.peak["Weight"])))
-            peaks_one = np.log10(self.peak["Weight"][0]) * 1 / (np.sqrt(2*np.pi) * sigma) * np.exp(-(frequency_range - self.peak["PeakLoc"][0])**2 / (2 * sigma**2))
-            plt.plot(frequency_range, peaks_sum, color='blue')
-            plt.plot(frequency_range,peaks_one, color='red')
+            peaks_one = self.peak["Weight"][0] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + self.peak["PeakLoc"][0])) * np.exp(-(frequency_range - self.peak["PeakLoc"][0])**2 / (2 * (sigma * (self.cen_freq * 1.0E+03 + self.peak["PeakLoc"][0]))**2))
+            peaks_one[peaks_one < lim] = lim
+            plt.semilogy(frequency_range, peaks_sum, color='blue')
+            plt.semilogy(frequency_range,peaks_one, color='red')
             for i, ion in enumerate(peak_sort["Ion"]):
-                plt.text(peak_sort["PeakLoc"][i], np.log10(peak_sort["Weight"][i])*1/(np.sqrt(2*np.pi)*sigma)+1, ion, fontsize=9)
-            plt.text(self.peak["PeakLoc"][0], np.log10(self.peak["Weight"][0])*1/(np.sqrt(2*np.pi)*sigma)+1, self.peak["Ion"][0], fontsize=9, color='red')
+                plt.text(peak_sort["PeakLoc"][i], peak_sort["Weight"][i] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + peak_sort["PeakLoc"][i])) + 0.1, ion, fontsize=9)
+            plt.text(self.peak["PeakLoc"][0], self.peak["Weight"][0] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + self.peak["PeakLoc"][0])) + 0.1, self.peak["Ion"][0], fontsize=9, color='red')
         else:
             plt.plot(frequency_range, peaks_sum, color='blue')
             for i, ion in enumerate(peak_sort["Ion"]):
-                plt.text(peak_sort["PeakLoc"][i], np.log10(peak_sort["Weight"][i])*1/(np.sqrt(2*np.pi)*sigma)+1, ion, fontsize=9)
+                plt.text(peak_sort["PeakLoc"][i], peak_sort["Weight"][i] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + peak_sort["PeakLoc"][i])) + 0.1, ion, fontsize=9)
             for i, ion in enumerate(self.find_result["Ion"]):
-                plt.plot(frequency_range, np.log10(self.find_result["Weight"][i]) * 1 / (np.sqrt(2*np.pi) * sigma) * np.exp(-(frequency_range - self.find_result["PeakLoc"][i])**2 / (2 * sigma**2)), color='red')
-                plt.text(self.find_result["PeakLoc"][i], np.log10(self.find_result["Weight"][i])*1/(np.sqrt(2*np.pi)*sigma)+1, ion, fontsize=9, color='red')
+                peak_one = self.find_result["Weight"][i] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+3 + self.find_result["PeakLoc"][i])) * np.exp(-(frequency_range - self.find_result["PeakLoc"][i])**2 / (2 * (sigma * (self.cen_freq * 1.0E+03 + self.find_result["PeakLoc"][i]))**2))
+                peak_one[peak_one < lim] = lim
+                plt.semilogy(frequency_range, peak_one, color='red')
+                plt.text(self.find_result["PeakLoc"][i], self.find_result["Weight"][i] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + self.find_result["PeakLoc"][i])) + 0.1, ion, fontsize=9, color='red')
         plt.xlim((-self.span/2,self.span/2))
         plt.ylim(bottom=0)
         plt.xlabel("center frequency {:} [MHz]\nreference frequency [kHz]".format(self.cen_freq))
