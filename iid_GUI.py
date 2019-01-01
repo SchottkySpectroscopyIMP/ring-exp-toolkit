@@ -102,13 +102,24 @@ class IID(Utility):
 
     def calibrate_peak_loc(self, ion, peak_loc, harmonic):
         '''
-        using the measured peak location with the identified ion to calibrate the magnetic rigidity of CSRe
+        using the measured peak location with the identified ion to calibrate
         ion:        a string in the format of AElementQ, e.g. 3He2
         peak_loc:   peak location in kHz after deduction of the center frequency
         harmonic:   harmonic number
         '''
         self.set_ion(ion)
         self.set_peak_loc(peak_loc, harmonic)
+        self.peak = self.calc_peak()
+        return self.peak
+
+    def calibrate_Brho(self, ion, Brho):
+        '''
+        using the measured Brho with the identified ion to calibrate
+        ion:        a string in the format of AElementQ, e.g. 3He2
+        Brho:       the magnetic rigidity of the target ion in Tm
+        '''
+        self.set_ion(ion)
+        self.set_Brho(Brho)
         self.peak = self.calc_peak()
         return self.peak
 
@@ -134,7 +145,7 @@ class IID(Utility):
         show the information of the selected ion peak
         '''
         ion_result = self.peak
-        ion_result = ion_result[np.abs(ion_result.PeakLoc-peakLoc_input) <= (self.sigma*self.cen_freq*1E-03)/2]
+        ion_result = ion_result[np.abs(ion_result.PeakLoc-peakLoc_input) <= (self.sigma*self.cen_freq*1E+03)]
         ion_result = ion_result.reset_index(drop=True)
         return ion_result
 
@@ -150,7 +161,6 @@ class IID(Utility):
             a = row_Weight / (np.sqrt(2*np.pi) * self.sigma*(self.cen_freq * 1.0E+03 + row_PeakLoc)) * np.exp(-(frequency_range - row_PeakLoc)**2 / (2 * (self.sigma * (self.cen_freq * 1.0E+03 + row_PeakLoc))**2))
             a[a < lim] = lim
             return a
-            #return row_Weight / (np.sqrt(2*np.pi) * self.sigma*(self.cen_freq * 1.0E+03 + row_PeakLoc)) * np.exp(-(frequency_range - row_PeakLoc)**2 / (2 * (self.sigma * (self.cen_freq * 1.0E+03 + row_PeakLoc))**2))
         self.peak_sort["PeakFunc"] = self.peak_sort.apply(lambda row: formFunc(row['Weight'], row['PeakLoc']), axis=1)
         peak_sum = self.peak_sort["PeakFunc"].sum()
         isotopes_list = []
@@ -269,18 +279,30 @@ class IID_MainWindow(QMainWindow):
         self.IonCheck = QCheckBox("Element", self)
         self.IonCheck.setFont(self.fontLab)
         self.IonCheck.setStyleSheet("QCheckBox::indicator::unchecked{border: 1px groove silver; background-color:white}")
-        self.IonInput = QLineEdit("", self)#self.ion, self)
+        self.IonInput = QLineEdit("", self)
         self.IonInput.setFont(self.fontProc)
         self.QLineEdit_LockStyle(self.IonInput) 
         self.IonButton = QPushButton("Search", self)
         self.IonButton.setFont(self.fontLab)
 
         # calibrate the ion
-        self.CalibrateIonInput = QLineEdit("e.g. 3H2",self)
+        self.CalibrateIonLab = QLabel("Ion (e.g. 3H2)", self)
+        self.CalibrateIonLab.setFont(self.fontLab)
+        self.CalibrateIonInput = QLineEdit("", self)
         self.CalibrateIonInput.setFont(self.fontProc)
-        self.CalibratePeakInput = QLineEdit("e.g. 113 [kHz]",self)
+        self.CalibrateBrhoCheck = QCheckBox("Brho [Tm] (e.g. 7.098)", self)
+        self.CalibrateBrhoCheck.setFont(self.fontLab)
+        self.CalibrateBrhoCheck.setStyleSheet("QCheckBox::indicator::unchecked{border: 1px groove silver; background-color:white}")
+        self.CalibrateBrhoInput = QLineEdit("", self)
+        self.CalibrateBrhoInput.setFont(self.fontProc)
+        self.QLineEdit_LockStyle(self.CalibrateBrhoInput)
+        self.CalibratePeakLab = QLabel("PeakLoc [kHz] (e.g. 113)")
+        self.CalibratePeakLab.setFont(self.fontLab)
+        self.CalibratePeakInput = QLineEdit("",self)
         self.CalibratePeakInput.setFont(self.fontProc)
-        self.CalibrateHarmInput = QLineEdit("e.g. 151",self)
+        self.CalibrateHarmLab = QLabel("Harmonic (e.g. 151)")
+        self.CalibrateHarmLab.setFont(self.fontLab)
+        self.CalibrateHarmInput = QLineEdit("",self)
         self.CalibrateHarmInput.setFont(self.fontProc)
         self.CalibrateButton = QPushButton("Calibrate", self)
         self.CalibrateButton.setFont(self.fontLab)
@@ -294,7 +316,6 @@ class IID_MainWindow(QMainWindow):
         self.win = pg.GraphicsLayoutWidget()
         self.spectrum = self.win.addPlot(title="Simulation of the Schottky spectrum")
         self.spectrum.setLogMode(False,True)
-        #self.spectrum.setYRange(-2, 10)
 
         # marker of the ions in spectrum
         self.crosshair_v = pg.InfiniteLine(pos=0, angle=90, pen=self.fgcolor)
@@ -303,19 +324,24 @@ class IID_MainWindow(QMainWindow):
         # set the Ion panel
         IonGrid = QGridLayout()
         IonGrid.setSpacing(5)
-        IonGrid.addWidget(self.vFileList, 0, 0, 5, 3)
-        IonGrid.addWidget(self.FileCheck, 0, 3, 1, 2)
-        IonGrid.addWidget(self.cenFreqLab, 1, 3, 1, 2)
-        IonGrid.addWidget(self.cenFreqInput, 2, 3, 1, 2)
-        IonGrid.addWidget(self.spanLab, 3, 3, 1, 2)
-        IonGrid.addWidget(self.spanInput, 4, 3, 1, 2)
-        IonGrid.addWidget(self.IonCheck, 5, 0, 1, 1)#, Qt.AlignHCenter)
-        IonGrid.addWidget(self.IonInput, 5, 1, 1, 1)
-        IonGrid.addWidget(self.IonButton, 5, 2, 1, 1)
-        IonGrid.addWidget(self.CalibrateButton, 0, 5, 1, 1)
-        IonGrid.addWidget(self.CalibrateIonInput, 2, 5, 1, 1)#, Qt.AlignHCenter)
-        IonGrid.addWidget(self.CalibratePeakInput, 3, 5, 1, 1)
-        IonGrid.addWidget(self.CalibrateHarmInput, 4, 5, 1, 1)
+        IonGrid.addWidget(self.vFileList, 0, 0, 6, 3)
+        IonGrid.addWidget(self.FileCheck, 0, 3, 1, 1)
+        IonGrid.addWidget(self.CalibrateButton, 0, 4, 1, 1)
+        IonGrid.addWidget(self.cenFreqLab, 1, 3, 1, 1)
+        IonGrid.addWidget(self.cenFreqInput, 2, 3, 1, 1)
+        IonGrid.addWidget(self.spanLab, 1, 4, 1, 1)
+        IonGrid.addWidget(self.spanInput, 2, 4, 1, 1)
+        IonGrid.addWidget(self.CalibrateIonLab, 3, 3, 1, 1)
+        IonGrid.addWidget(self.CalibrateIonInput, 4, 3, 1, 1)#, Qt.AlignHCenter)
+        IonGrid.addWidget(self.CalibrateBrhoCheck, 3, 4, 1, 1)
+        IonGrid.addWidget(self.CalibrateBrhoInput, 4, 4, 1, 1)
+        IonGrid.addWidget(self.CalibratePeakLab, 5, 3, 1, 1)
+        IonGrid.addWidget(self.CalibratePeakInput, 6, 3, 1, 1)
+        IonGrid.addWidget(self.CalibrateHarmLab, 5, 4, 1, 1)
+        IonGrid.addWidget(self.CalibrateHarmInput, 6, 4, 1, 1)
+        IonGrid.addWidget(self.IonCheck, 6, 0, 1, 1)#, Qt.AlignHCenter)
+        IonGrid.addWidget(self.IonInput, 6, 1, 1, 1)
+        IonGrid.addWidget(self.IonButton, 6, 2, 1, 1)
         self.IonPanel = QGroupBox()
         self.IonPanel.setStyleSheet("QGroupBox{border: 1px groove silver; margin: 1px; padding-top: 0}")
         self.IonPanel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
@@ -341,40 +367,59 @@ class IID_MainWindow(QMainWindow):
                 self.QLineEdit_LockStyle(self.IonInput)
         self.IonCheck.stateChanged.connect(check_elementInput)
 
-        def button_ionCalibrate():
-            # print(self.peak_list['Ion'])
-            if self.CalibrateIonInput.text() == "" or self.CalibratePeakInput.text() == "" or self.CalibrateHarmInput.text()== "":
-                self.statusBar().showMessage("No valid input!")
-                return
-            if self.CalibrateIonInput.text() in self.peak_list['Ion'].values:
-                self.statusBar().showMessage("Calibrating ...")
-
-                def data_calibrate_worker():
-                    self.peak_list = self.FileWork.calibrate_peak_loc(self.CalibrateIonInput.text(), float(self.CalibratePeakInput.text()), int(self.CalibrateHarmInput.text()))
-                    self.ion = re.sub("[^A-Za-z]", "", self.peak_list["Ion"][0])
-                    self.message, self.frequency_range, self.peak_sum, self.isotopes_list = self.FileWork.gaussian_peak(self.ion)
-
-                def data_calibrate_ready():
-                    self.spectrum.clear()
-                    self.spectrum.plot(self.frequency_range, self.peak_sum, pen=pg.mkPen(self.green, width=2))
-                    for isotope in self.isotopes_list:
-                        self.spectrum.plot(self.frequency_range, isotope, pen=pg.mkPen(self.orange, width=2))
-                        #self.spectrum.showGrid(x=True, y=True)
-                    self.spectrum.addItem(self.crosshair_v, ignoreBounds=True)
-                    self.crosshair_v.setValue(0)
-                    self.QTable_setModel(self.peak_list, self.IonTable)
-                    self.IonInput.setText(self.ion)
-                    self.statusBar().showMessage("Data has been calibrated!")
-                    self.CalibrateIonInput.setText("e.g. 3H2")
-                    self.CalibratePeakInput.setText("e.g. 113 [kHz]")
-                    self.CalibrateHarmInput.setText("e.g. 151")
-        
-                worker = Worker(data_calibrate_worker)
-                worker.signals.finished.connect(data_calibrate_ready)
-                self.threadPool.start(worker) 
+        def check_BrhoInput():
+            if self.CalibrateBrhoCheck.isChecked():
+                self.QLineEdit_InputStyle(self.CalibrateBrhoInput)
             else:
-                self.statusBar().showMessage("no valid ion input!")
-                return 
+                self.QLineEdit_LockStyle(self.CalibrateBrhoInput)
+        self.CalibrateBrhoCheck.stateChanged.connect(check_BrhoInput)
+
+        def button_ionCalibrate():
+            if self.CalibrateBrhoCheck.isChecked():
+                if self.CalibrateIonInput.text() == "" or self.CalibrateBrhoInput.text() == "":
+                    self.statusBar().showMessage("No valid input!")
+                    return
+                if self.CalibrateIonInput.text() in self.peak_list['Ion'].values:
+                    self.statusBar().showMessage("Calibrating ...")
+                else:
+                    self.statusBar().showMessage("no valid ion input!")
+                    return 
+            else:
+                if self.CalibrateIonInput.text() == "" or self.CalibratePeakInput.text() == "" or self.CalibrateHarmInput.text()== "":
+                    self.statusBar().showMessage("No valid input!")
+                    return
+                if self.CalibrateIonInput.text() in self.peak_list['Ion'].values:
+                    self.statusBar().showMessage("Calibrating ...")
+                else:
+                    self.statusBar().showMessage("no valid ion input!")
+                    return 
+
+            def data_calibrate_worker():
+                if self.CalibrateBrhoCheck.isChecked():
+                    self.peak_list = self.FileWork.calibrate_Brho(self.CalibrateIonInput.text(), float(self.CalibrateBrhoInput.text()))
+                else:
+                    self.peak_list = self.FileWork.calibrate_peak_loc(self.CalibrateIonInput.text(), float(self.CalibratePeakInput.text()), int(self.CalibrateHarmInput.text()))
+                self.ion = re.sub("[^A-Za-z]", "", self.peak_list["Ion"][0])
+                self.message, self.frequency_range, self.peak_sum, self.isotopes_list = self.FileWork.gaussian_peak(self.ion)
+
+            def data_calibrate_ready():
+                self.spectrum.clear()
+                self.spectrum.plot(self.frequency_range, self.peak_sum, pen=pg.mkPen(self.green, width=2))
+                for isotope in self.isotopes_list:
+                    self.spectrum.plot(self.frequency_range, isotope, pen=pg.mkPen(self.orange, width=2))
+                    #self.spectrum.showGrid(x=True, y=True)
+                self.spectrum.addItem(self.crosshair_v, ignoreBounds=True)
+                self.crosshair_v.setValue(0)
+                self.QTable_setModel(self.peak_list, self.IonTable)
+                self.IonInput.setText(self.ion)
+                self.statusBar().showMessage("Data has been calibrated!")
+                self.CalibratePeakInput.setText("{:.0f}".format(self.peak_list[self.peak_list['Ion'].isin([self.CalibrateIonInput.text()])]["PeakLoc"].values[0]))
+                self.CalibrateHarmInput.setText("{:d}".format(self.peak_list[self.peak_list['Ion'].isin([self.CalibrateIonInput.text()])]["Harmonic"].values[0]))
+                self.CalibrateBrhoInput.setText("{:.5f}".format(self.FileWork.Brho))
+        
+            worker = Worker(data_calibrate_worker)
+            worker.signals.finished.connect(data_calibrate_ready)
+            self.threadPool.start(worker) 
         self.CalibrateButton.clicked.connect(button_ionCalibrate)
 
         def button_elementSearch():
