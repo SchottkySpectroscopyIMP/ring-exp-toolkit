@@ -370,8 +370,12 @@ class IID_MainWindow(QMainWindow):
         def check_BrhoInput():
             if self.CalibrateBrhoCheck.isChecked():
                 self.QLineEdit_InputStyle(self.CalibrateBrhoInput)
+                self.QLineEdit_LockStyle(self.CalibratePeakInput)
+                self.QLineEdit_LockStyle(self.CalibrateHarmInput)
             else:
                 self.QLineEdit_LockStyle(self.CalibrateBrhoInput)
+                self.QLineEdit_InputStyle(self.CalibratePeakInput)
+                self.QLineEdit_InputStyle(self.CalibrateHarmInput)
         self.CalibrateBrhoCheck.stateChanged.connect(check_BrhoInput)
 
         def button_ionCalibrate():
