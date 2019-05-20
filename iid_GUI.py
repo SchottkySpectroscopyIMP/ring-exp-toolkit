@@ -36,7 +36,7 @@ class IID(Utility):
             if self.verbose: print("nuclear half-lives loaded")
         except OSError:
             with io.StringIO() as buf:
-                with open("nubase2016.text") as nubase:
+                with open("nubase2016.txt") as nubase:
                     for line in nubase:
                         if line[7] != '0':
                             continue
