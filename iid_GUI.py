@@ -112,13 +112,11 @@ class IID(Utility):
         self.peak = self.calc_peak()
         return self.peak
 
-    def calibrate_Brho(self, ion, Brho):
+    def calibrate_Brho(self, Brho):
         '''
         using the measured Brho with the identified ion to calibrate
-        ion:        a string in the format of AElementQ, e.g. 3He2
         Brho:       the magnetic rigidity of the target ion in Tm
         '''
-        self.set_ion(ion)
         self.set_Brho(Brho)
         self.peak = self.calc_peak()
         return self.peak
@@ -380,14 +378,11 @@ class IID_MainWindow(QMainWindow):
 
         def button_ionCalibrate():
             if self.CalibrateBrhoCheck.isChecked():
-                if self.CalibrateIonInput.text() == "" or self.CalibrateBrhoInput.text() == "":
+                if self.CalibrateBrhoInput.text() == "":
                     self.statusBar().showMessage("No valid input!")
                     return
-                if self.CalibrateIonInput.text() in self.peak_list['Ion'].values:
-                    self.statusBar().showMessage("Calibrating ...")
                 else:
-                    self.statusBar().showMessage("no valid ion input!")
-                    return 
+                    self.statusBar().showMessage("Calibrating ...")
             else:
                 if self.CalibrateIonInput.text() == "" or self.CalibratePeakInput.text() == "" or self.CalibrateHarmInput.text()== "":
                     self.statusBar().showMessage("No valid input!")
@@ -400,7 +395,7 @@ class IID_MainWindow(QMainWindow):
 
             def data_calibrate_worker():
                 if self.CalibrateBrhoCheck.isChecked():
-                    self.peak_list = self.FileWork.calibrate_Brho(self.CalibrateIonInput.text(), float(self.CalibrateBrhoInput.text()))
+                    self.peak_list = self.FileWork.calibrate_Brho(float(self.CalibrateBrhoInput.text()))
                 else:
                     self.peak_list = self.FileWork.calibrate_peak_loc(self.CalibrateIonInput.text(), float(self.CalibratePeakInput.text()), int(self.CalibrateHarmInput.text()))
                 self.ion = re.sub("[^A-Za-z]", "", self.peak_list["Ion"][0])
@@ -417,8 +412,9 @@ class IID_MainWindow(QMainWindow):
                 self.QTable_setModel(self.peak_list, self.IonTable)
                 self.IonInput.setText(self.ion)
                 self.statusBar().showMessage("Data has been calibrated!")
-                self.CalibratePeakInput.setText("{:.0f}".format(self.peak_list[self.peak_list['Ion'].isin([self.CalibrateIonInput.text()])]["PeakLoc"].values[0]))
-                self.CalibrateHarmInput.setText("{:d}".format(self.peak_list[self.peak_list['Ion'].isin([self.CalibrateIonInput.text()])]["Harmonic"].values[0]))
+                if not self.CalibrateBrhoCheck.isChecked():
+                    self.CalibratePeakInput.setText("{:.0f}".format(self.peak_list[self.peak_list['Ion'].isin([self.CalibrateIonInput.text()])]["PeakLoc"].values[0]))
+                    self.CalibrateHarmInput.setText("{:d}".format(self.peak_list[self.peak_list['Ion'].isin([self.CalibrateIonInput.text()])]["Harmonic"].values[0]))
                 self.CalibrateBrhoInput.setText("{:.5f}".format(self.FileWork.Brho))
         
             worker = Worker(data_calibrate_worker)
@@ -504,6 +500,7 @@ class IID_MainWindow(QMainWindow):
             self.spectrum.addItem(self.crosshair_v, ignoreBounds=True)
             self.crosshair_v.setValue(0)
             self.QTable_setModel(self.peak_list, self.IonTable)
+            self.CalibrateBrhoInput.setText("{:.5f}".format(self.FileWork.Brho))
             self.IonInput.setText(self.ion)
             self.statusBar().showMessage("Selected file has been loaded!")
         
