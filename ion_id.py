@@ -9,46 +9,24 @@ from utility import Utility
 
 class IID(Utility):
     '''
-    A class for ion identification from a Schottky spectrum
-    It can be imported into an IPython session to gain interactive operations
+    A script for auto calibrating the ion identification result based on the input Schottky spectrum
     '''
-
-    def __init__(self, lpp_str, cen_freq, span, n_peak=10, L_CSRe=128.8, verbose=False):
+    def __init__(self, lppion, cen_freq, span, n_peak=10, GUI_mode=False, L_CSRe=128.8, verbose=False):
         '''
         extract all the secondary fragments and their respective yields calculated by LISE++
-        lpp_str:    LISE++ output file to be loaded
+        (including Mass, Half-life, Yield of all the fragments)
+        lppion:    LISE++ output file to be loaded
         cen_freq:   center frequency of the spectrum in MHz
         span:       span of the spectrum in kHz
         n_peak:     number of peaks to be identified
         L_CSRe:     circumference of CSRe in m, default value 128.8
         '''
         self.n_peak = n_peak
+        self.sigma = 1.0e-5
+        self.GUI_mode = GUI_mode
         super().__init__(cen_freq, span, L_CSRe, verbose)
-        try:
-            self.nucl_life = pd.read_csv("nuclear_half_lives.csv", na_filter=False)
-            if self.verbose: print("nuclear half-lives loaded")
-        except OSError:
-            with io.StringIO() as buf:
-                with open("nubase2016.txt") as nubase:
-                    for line in nubase:
-                        if line[7] != '0':
-                            continue
-                        element = ''.join(c for c in line[11:16] if c.isalpha())
-                        stubs = line[60:78].split()
-                        half_life = stubs[0].rstrip('#') if len(stubs) > 0 else "n/a"
-                        if half_life[-1].isdigit():
-                            half_life += ' '+stubs[1]
-                        buf.write(','.join([line[:3], element, line[4:7], half_life]) + '\n')
-                buf.seek(0) # rewind the file pointer to the beginning
-                self.nucl_life = pd.read_csv(buf, na_filter=False, names=['A', "Element", 'Z', "HalfLife"])
-            self.nucl_life.loc[self.nucl_life["Element"]=="Ed", "Element"] = "Nh" # Z=113
-            self.nucl_life.loc[self.nucl_life["Element"]=="Ef", "Element"] = "Mc" # Z=115
-            self.nucl_life.loc[self.nucl_life["Element"]=="Eh", "Element"] = "Ts" # Z=117
-            self.nucl_life.loc[self.nucl_life["Element"]=="Ei", "Element"] = "Og" # Z=118
-            self.nucl_life.to_csv("nuclear_half_lives.csv", index=False)
-            if self.verbose: print("nuclear half-lives saved")
         with io.StringIO() as buf:
-            with open(lpp_str, encoding="latin-1") as lpp:
+            with open(lppion, encoding='latin-1') as lpp:
                 while True:
                     line = lpp.readline().strip()
                     if line == "[D1_DipoleSettings]":
@@ -58,10 +36,91 @@ class IID(Utility):
                 for line in lpp:
                     segment = line.strip().split(',')[0]
                     stubs = segment.split()
-                    buf.write(' '.join([stubs[0]+stubs[1][:-1], stubs[-1][1:]]) + '\n')
+                    A, element, Q = re.split("([A-Z][a-z]?)", stubs[0]+stubs[1][:-1])
+                    buf.write(' '.join([A, element, Q, stubs[-1][1:]]) + '\n')
             buf.seek(0)
-            self.fragment = pd.read_csv(buf, delim_whitespace=True, names=["Ion", "Yield"])
+            self.fragment = pd.read_csv(buf, delim_whitespace=True, names=['A', "Element", 'Q', "Yield"])
+        self.fragment = pd.merge(self.fragment, self.atom_data)
         self.calc_peak()
+
+    def calc_peak(self):
+        '''
+        calculate peak locations of the Schottky signals from secondary fragments visible in the pre-defined frequency range
+        '''
+        self.peak = self.fragment
+        gamma_beta = self.Brho / self.peak["Mass"] * self.peak['Q'] / self.c / self.u2kg * self.e
+        beta = gamma_beta / np.sqrt(1 + gamma_beta**2)
+        gamma = 1 / np.sqrt(1 - beta**2)
+        energy = (gamma - 1) / self.MeV2u # MeV/u
+        self.peak["RevFreq"] = beta * self.c / self.L_CSRe / 1e6 # MHz
+        self.peak["Weight"] = self.peak["Yield"] * self.peak['Q']**2 * self.peak["RevFreq"]**2
+        lower_freq, upper_freq = self.cen_freq - self.span/2e3, self.cen_freq + self.span/2e3 # MHz, MHz
+        def calc_harmonic(x, lower_freq, upper_freq):
+            return np.arange(np.ceil(lower_freq/x), np.floor(upper_freq/x)+1).astype(int)
+        self.peak["Harmonic"] = self.peak.apply(lambda x: calc_harmonic(x["RevFreq"], lower_freq, upper_freq), axis=1)
+        peak_dict_temp = self.peak.to_dict()
+        peak_dict = {'A': {}, "Element": {}, 'Q': {}, "Yield": {}, "HalfLife": {}, "RevFreq": {}, "Harmonic": {}, "PeakLoc": {}, "Weight": {}}
+        ind = 0
+        for index in range(len(peak_dict_temp["Harmonic"])):
+            for h in peak_dict_temp["Harmonic"][index]:
+                for each in peak_dict:
+                    if each is "Harmonic":
+                        peak_dict[each].update({ind: h})
+                    elif each is "PeakLoc":
+                        peak_dict[each].update({ind: (h * peak_dict_temp["RevFreq"][index] - self.cen_freq) * 1e3})
+                    else:
+                        peak_dict[each].update({ind: peak_dict_temp[each][index]})
+                ind += 1
+        self.peak = pd.DataFrame.from_dict(peak_dict)
+        self.peak["Ion"] = self.peak.apply(lambda x: "{}{}{}".format(x['A'], x["Element"], x['Q']), axis=1)
+        self.peak.sort_values("Weight", ascending=False, inplace=True, kind="mergesort")
+        self.peak.reset_index(drop=True, inplace=True)
+        if self.GUI_mode:
+            frequencyRange, ionPeaks = self.calc_gaussian_peak()
+            return frequencyRange, ionPeaks, self.peak.loc[:, ["Ion", "Yield", "HalfLife", "Harmonic", "PeakLoc", "RevFreq", "Weight"]]
+        else:
+            self.show()
+            return
+
+    def calc_gaussian_peak(self):
+        '''
+        return the spectrum including all the selected ions in form of Gaussian peak
+        default: sigma = delta f / rev_freq = 1e-5
+        for each ion: width = sigma * harmonic * rev_freq / 1.66
+        '''
+        frequencyRange = np.linspace(-self.span/2, self.span/2, 8192) # kHz
+        lim = self.peak["Weight"].max() / 1e5
+        def calc_ion_peak(x):
+            width = self.sigma * x["Harmonic"] * x["RevFreq"] * 1e3 / 1.66
+            a = x["Weight"] / (np.sqrt(2 * np.pi) * width) * np.exp(-(frequencyRange - x["PeakLoc"])**2 / (2 * width**2))
+            a[a < lim] = lim
+            return a
+        ionPeaks = np.sum(self.peak.apply(lambda x: calc_ion_peak(x), axis=1))
+        return frequencyRange, ionPeaks
+        
+    def set_ion(self, ion):
+        '''
+        override the function from the Utility.set_ion()
+        set the target ion, to be input in the format of AElementQ, e.g., 3He2
+        '''
+        element = ''.join(c for c in ion if c.isalpha())
+        A, Q = map(int, ion.split(element))
+        select_nucl = (self.fragment['A']==A) & (self.fragment["Element"]==element) & (self.fragment["Q"]==Q)
+        if not select_nucl.any():
+            print("Error: ion is not existed in the fragments!")
+            return
+        self.index = self.fragment.loc[select_nucl].index[0] # index of the target ion in the lookup table
+        self.Q = Q
+        self.mass = self.fragment.iloc[self.index]["Mass"]
+        self.halfLife = self.fragment.iloc[self.index]["HalfLife"]
+
+    def calibrate_Brho(self, Brho):
+        '''
+        using the measured Brho with the identified ion to calibrate
+        Brho:       the magnetic rigidity of the target ion in Tm
+        '''
+        self.Brho = Brho
+        return self.calc_peak()
 
     def calibrate_peak_loc(self, ion, peak_loc, harmonic):
         '''
@@ -70,10 +129,11 @@ class IID(Utility):
         peak_loc:   peak location in kHz after deduction of the center frequency
         harmonic:   harmonic number
         '''
+        rev_freq = (self.cen_freq + peak_loc/1e3) / harmonic # MHz
         self.set_ion(ion)
-        self.set_peak_loc(peak_loc, harmonic)
-        self.calc_peak()
-
+        self.set_rev_freq(rev_freq)
+        return self.calc_peak()
+    
     def calibrate_rev_freq(self, ion, peak_loc_1, peak_loc_2):
         '''
         using the measured revolution frequency with the identified ion to calibrate the magnetic rigidity of CSRe
@@ -84,7 +144,7 @@ class IID(Utility):
         rev_freq = np.absolute(peak_loc_2-peak_loc_1) / 1e3 # MHz
         self.set_ion(ion)
         self.set_rev_freq(rev_freq)
-        self.calc_peak()
+        return self.calc_peak()
 
     def update_cen_freq(self, cen_freq):
         '''
@@ -114,37 +174,10 @@ class IID(Utility):
         self.L_CSRe = L_CSRe # m
         self.calc_peak()
 
-    def calc_peak(self):
-        '''
-        calculate peak locations of the Schottky signals from secondary fragments visible in the pre-defined frequency range
-        '''
-        index, rev_freq, peak_loc, harmonic, half_life = [], [], [], [], []
-        for row in self.fragment.itertuples():
-            A, element, _ = re.split("([A-Z][a-z]?)", row.Ion)
-            T_half = self.nucl_life.loc[(self.nucl_life['A']==int(A)) & (self.nucl_life["Element"]==element), "HalfLife"].item()
-            self.set_ion(row.Ion)
-            self.set_Brho(self.Brho)
-            i = 0
-            while i < self.peak_loc.size:
-                index.append(row.Index)
-                half_life.append(T_half)
-                rev_freq.append(self.rev_freq) # MHz
-                peak_loc.append(self.peak_loc[i]) # kHz
-                harmonic.append(self.harmonic[i])
-                i += 1
-        candidate = self.fragment.iloc[index]
-        candidate.index = np.arange(candidate.index.size)
-        frequency = pd.DataFrame.from_dict({"HalfLife": half_life, "RevFreq": rev_freq, "PeakLoc": peak_loc, "Harmonic": harmonic})
-        self.peak = pd.concat([candidate, frequency], axis=1)
-        self.show()
-
     def show(self):
         '''
         list the most prominent peaks in a Schottky spectrum sorted in a descending order
         '''
-        Q = self.peak["Ion"].str.split("[A-Z][a-z]?").str[-1].apply(int)
-        self.peak["Weight"] = self.peak["Yield"] * Q**2 * self.peak["RevFreq"]**2
-        self.peak.sort_values("Weight", ascending=False, inplace=True, kind="mergesort")
         print('-' * 16)
         print("center frequency\t{:g} MHz".format(self.cen_freq))
         print("span\t\t\t{:g} kHz".format(self.span))
@@ -163,99 +196,21 @@ class IID(Utility):
                 lambda x: "{:<3d}".format(x),
                 ] ))
 
-    def plot_delta(self, display_num=10):
+    def help(self):
         '''
-        plot the most prominent peaks (delta) in a Schottky spectrum
+        override the function from Utility.help() 
+        display all the available functions of the class: IID
         '''
-        self.update_n_peak(display_num) if display_num != -1 else self.update_n_peak(len(self.peak["Weight"]))
-        print("total number of ions: {:}".format(len(self.peak["Weight"])))
-        print("number of displayed ions: {:}".format(display_num)) if display_num != -1 else print("number of displayed ions: {:}".format(len(self.peak["Weight"])))
-        peak_sort = self.peak.reset_index(drop=True)
-        (markerline, stemlines, baseline) = plt.stem(peak_sort["PeakLoc"][:display_num], np.log10(peak_sort["Weight"][:display_num]), markerfmt='g.')
-        plt.setp(baseline, color='grey', linewidth=1)
-        plt.setp(stemlines, color='olive', linewidth=0.5)
-        for i, ion in enumerate(peak_sort["Ion"][:display_num]):
-            plt.text(peak_sort["PeakLoc"][i], np.log10(peak_sort["Weight"][i])+0.3, ion, fontsize=9)
-        plt.xlabel("center frequency {:} [MHz]\nreference frequency [kHz]".format(self.cen_freq))
-        plt.ylabel("Weight (log10)")
-        plt.show()
-
-    def plot_gaussian(self, display_ion=""):
-        '''
-        plot the most prominent peaks (gauss) in a Schottky spectrum
-        supposing
-        buttom_width = df = 5 * sigma
-        df/f = 5.0E-06                  # from the Schottky test result
-        '''
-        peak_sort = self.peak.reset_index(drop=True)
-        frequency_range = np.arange(-self.span/2,self.span/2,0.01)
-        sigma = 5.0E-06 / 5.0
-        lim = np.max(peak_sort["Weight"]) / 1.0E+05
-        def formFunc(row_Weight, row_PeakLoc):
-            a = row_Weight / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + row_PeakLoc)) * np.exp(-(frequency_range - row_PeakLoc)**2 / (2 * (sigma * (self.cen_freq * 1.0E+03 + row_PeakLoc))**2))
-            a[a < lim] = lim
-            return a
-        peak_sort["PeakFunc"] = peak_sort.apply(lambda row: formFunc(row['Weight'], row['PeakLoc']), axis=1)
-        peaks_sum = peak_sort["PeakFunc"].sum()
-        self.find_ion(display_ion)
-        if display_ion == "" or self.find_result.empty:
-            print("mark the primary beam instead.")
-            self.update_n_peak(len(self.peak["Weight"]))
-            print("total number of ions: {:}".format(len(self.peak["Weight"])))
-            peaks_one = self.peak["Weight"][0] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + self.peak["PeakLoc"][0])) * np.exp(-(frequency_range - self.peak["PeakLoc"][0])**2 / (2 * (sigma * (self.cen_freq * 1.0E+03 + self.peak["PeakLoc"][0]))**2))
-            peaks_one[peaks_one < lim] = lim
-            plt.semilogy(frequency_range, peaks_sum, color='blue')
-            plt.semilogy(frequency_range,peaks_one, color='red')
-            for i, ion in enumerate(peak_sort["Ion"]):
-                plt.text(peak_sort["PeakLoc"][i], peak_sort["Weight"][i] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + peak_sort["PeakLoc"][i])) + 0.1, ion, fontsize=9)
-            plt.text(self.peak["PeakLoc"][0], self.peak["Weight"][0] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + self.peak["PeakLoc"][0])) + 0.1, self.peak["Ion"][0], fontsize=9, color='red')
-        else:
-            plt.plot(frequency_range, peaks_sum, color='blue')
-            for i, ion in enumerate(peak_sort["Ion"]):
-                plt.text(peak_sort["PeakLoc"][i], peak_sort["Weight"][i] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + peak_sort["PeakLoc"][i])) + 0.1, ion, fontsize=9)
-            for i, ion in enumerate(self.find_result["Ion"]):
-                peak_one = self.find_result["Weight"][i] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+3 + self.find_result["PeakLoc"][i])) * np.exp(-(frequency_range - self.find_result["PeakLoc"][i])**2 / (2 * (sigma * (self.cen_freq * 1.0E+03 + self.find_result["PeakLoc"][i]))**2))
-                peak_one[peak_one < lim] = lim
-                plt.semilogy(frequency_range, peak_one, color='red')
-                plt.text(self.find_result["PeakLoc"][i], self.find_result["Weight"][i] / (np.sqrt(2*np.pi) * sigma * (self.cen_freq * 1.0E+03 + self.find_result["PeakLoc"][i])) + 0.1, ion, fontsize=9, color='red')
-        plt.xlim((-self.span/2,self.span/2))
-        plt.ylim(bottom=0)
-        plt.xlabel("center frequency {:} [MHz]\nreference frequency [kHz]".format(self.cen_freq))
-        plt.ylabel("Weight (log10)")
-        plt.show()
-
-    def find_ion(self, ion):
-        '''
-        show the information of the selected ion
-        '''
-        if ion == "":
-            print("No input!")
-            return
-        self.find_result = self.peak.set_index("Ion")
-        self.find_result = self.find_result[~self.find_result.index.duplicated()].filter(like=ion, axis=0)
-        self.find_result = self.find_result.reset_index()
-        if self.find_result.empty:
-            print("No valid ion!")
-        else:
-            print('-' * 16)
-            print("center frequency\t{:g} MHz".format(self.cen_freq))
-            print("span\t\t\t{:g} kHz".format(self.span))
-            print("orbital length\t\t{:g} m".format(self.L_CSRe))
-            print("Bρ\t\t\t{:.6g} Tm\n".format(self.Brho))
-            print(self.find_result.head(self.n_peak).to_string(index=False, justify="left",
-                columns=["Weight", "Ion", "HalfLife", "Yield", "RevFreq", "PeakLoc", "Harmonic"],
-                header=["Weight", " Ion", " Half-life", "Yield", "Rev.Freq.", "PeakLoc.", "Harmonic"],
-                formatters=[
-                    lambda x: "{:<8.2e}".format(x),
-                    lambda x: "{:<7s}".format(x),
-                    lambda x: "{:<11s}".format(x),
-                    lambda x: "{:<9.2e}".format(x),
-                    lambda x: "{:<8.6f}".format(x),
-                    lambda x: "{:< 4.0f}".format(x),
-                    lambda x: "{:<3d}".format(x),
-                    ] ))
-        
-
+        print('--' * 10 + '\n')
+        print('Display all avaliable functions of the IID\n')
+        print("calibrate_Brho(Brho)\n\tusing the measured Brho with the identified ion to calibrate\n\tBrho: the magnetic rigidity of the target ion [Tm]")
+        print("calibrate_peak_loc(ion, peak_loc, harmonic)\n\tusing the measured peak location with the identified ion to calibrate the magnetic rigidity of CSRe\n\tion:\t\ta string in the format of AElementQ, e.g., 3H2\n\tpeak_loc:\tpeak location after deduction of the center frequency [kHz]\n\tharmonic:\tharmonic number")
+        print("calibrate_rev_freq(ion, peak_loc_1, peak_loc_2)\n\tion:\t\ta string in the format of AElementQ, e.g., 3H2\n\tpeak_loc_1:\tpeak location after deduction of the center frequency [kHz]\n\tpeak_loc_2:\tanother peak location belonging to the same ions but differed by one harmonic number [kHz]")
+        print("update_cen_freq(cen_freq)\n\tset a new center frequency of the spectrum [MHz]")
+        print("update_span(span)\n\tset a new span of the spectrum [kHz]")
+        print("update_n_peak(n_peak)\n\tset a new numer of peaks to be shown in the output")
+        print("update_L_CSRe(L_CSRe)\n\tset the adjusted circumference of CSRe [m]")
+        print('\n' + '--' * 10) 
 
 if __name__ == "__main__":
     iid = IID("./58Ni28.lpp", 242.9, 500)

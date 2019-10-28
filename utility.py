@@ -229,10 +229,10 @@ class Utility(object):
     
     def help(self):
         '''
-        display all the available functions of the class: IID_Estimation
+        display all the available functions of the class: Utility
         '''
         print('--' * 10 + '\n')
-        print('Display all avaliable functions of the IID_Estimation\n')
+        print('Display all avaliable functions of the Utility\n')
         print("Input Only:")
         print("set_ion(ion)\n\tset the target ion, to be input in the format of AEmlementQ, e.g., 3H2")
         print("set_cen_freq(cen_freq)\n\tset a new center frequency of the spectrum [MHz]")
