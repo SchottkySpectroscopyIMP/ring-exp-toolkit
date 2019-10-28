@@ -7,10 +7,11 @@ import pandas as pd
 
 class Utility(object):
     '''
-    A class encapsulating some utility methods for the quick calculation during a beam time
-    It is intended to be imported, for example, into an IPython session
+    A class for the ion estimation during a beam time
+    A useful tool to calculate the a special ion (bare/H-like/He-like)
+    It is intended to be imported, e.g., into an IPython session
+    A preparation for the ion identification of the Schottky spectrum at CSRe
     '''
-
     c = 299792458 # speed of light in m/s
     e = 1.6021766208e-19 # elementary charge in C
     me = 5.4857990907e-4 # electron mass in u
@@ -20,17 +21,23 @@ class Utility(object):
     def __init__(self, cen_freq, span, L_CSRe=128.8, verbose=True):
         '''
         load the atomic mass dataset from disk, if any, otherwise build it and save it to disk
+        (atomic data including Mass, Half-life of all the nuclides in the Bare, H-like and, He-like ionization)
         cen_freq:   center frequency of the spectrum in MHz
         span:       span of the spectrum in kHz
         L_CSRe:     circumference of CSRe in m, default value 128.8
+
+        mass data from AME2016
+        half life from NUBASE2016
+        eletron binding energy from NIST Atomic Spectra Database - Ionization Energies Form 
+        https://physics.nist.gov/PhysRefData/ASD/ionEnergy.html
         '''
         self.cen_freq = cen_freq # MHz
         self.span = span # kHz
         self.L_CSRe = L_CSRe # m
         self.verbose = verbose
         try:
-            self.atom_mass = pd.read_csv("atomic_masses.csv")
-            if self.verbose: print("atomic masses loaded")
+            self.atom_data = pd.read_csv("atomic_data.csv")
+            if self.verbose: print("atomic data loaded")
         except OSError:
             with io.StringIO() as buf:
                 with open("./mass16.txt") as ame:
@@ -42,14 +49,43 @@ class Utility(object):
                         else:
                             buf.write(l[16:23] + l[11:15] + l[96:99] + l[100:112] + " measured\n")
                 buf.seek(0) # rewind the file pointer to the beginning
-                self.atom_mass = pd.read_csv(buf, delim_whitespace=True, names=['A', "Element", 'Z', "Mass", "Source"])
-            self.atom_mass.loc[self.atom_mass["Element"]=="Ed", "Element"] = "Nh" # Z=113
-            self.atom_mass.loc[self.atom_mass["Element"]=="Ef", "Element"] = "Mc" # Z=115
-            self.atom_mass.loc[self.atom_mass["Element"]=="Eh", "Element"] = "Ts" # Z=117
-            self.atom_mass.loc[self.atom_mass["Element"]=="Ei", "Element"] = "Og" # Z=118
-            self.atom_mass["Mass"] /= 1e6 # masses are scaled to be in u
-            self.atom_mass.to_csv("atomic_masses.csv", index=False)
-            if self.verbose: print("atomic masses saved")
+                atom_mass = pd.read_csv(buf, delim_whitespace=True, names=['A', "Element", 'Z', "Mass", "Source"])
+            with io.StringIO() as buf:
+                with open("./nubase2016.txt") as nubase:
+                    for line in nubase:
+                        if line[7] != '0':
+                            continue
+                        stubs = line[60:78].split()
+                        half_life = stubs[0].rstrip('#') if len(stubs) > 0 else "n/a"
+                        half_life += '' + stubs[1] if half_life[-1].isdigit() else ""
+                        buf.write(','.join([line[:3], line[4:7], half_life]) + '\n')
+                buf.seek(0)
+                nucl_life = pd.read_csv(buf, na_filter=False, names=['A', 'Z', "HalfLife"])
+            atom_data = pd.merge(atom_mass, nucl_life)
+            atom_data.loc[atom_data["Element"]=="Ed", "Element"] = "Nh" # Z=113
+            atom_data.loc[atom_data["Element"]=="Ef", "Element"] = "Mc" # Z=115
+            atom_data.loc[atom_data["Element"]=="Eh", "Element"] = "Ts" # Z=117
+            atom_data.loc[atom_data["Element"]=="Ei", "Element"] = "Og" # Z=118
+            atom_data["Mass"] /= 1e6 # masses are scaled to be in u
+            atom_data['Q'] = atom_data['Z']
+            atom_data["Mass"] -= self.me * atom_data['Q'] # ionic mass in u for bare ions
+            del atom_mass, nucl_life
+            self.atom_data = atom_data
+            bde = pd.read_csv("./electron_binding_energy.csv", encoding='utf8')
+            bde["BindingEnergy"] *= self.MeV2u *1e-3        
+            def ion_like(pre_ion, bindEn, electron_num):
+                if pre_ion["Element"] in bindEn["Element"].values:
+                    return (pre_ion["Mass"] + electron_num * self.me - bindEn[bindEn["Element"]==pre_ion["Element"]]["BindingEnergy"].values)[0]
+                else:
+                    return np.nan
+            for electron_num in [1, 2]:
+                nucl_like = atom_data[atom_data['Z'] > electron_num].reset_index(drop=True)
+                nucl_like["Mass"] = nucl_like.apply(lambda x: ion_like(x, bde, electron_num), axis=1)
+                nucl_like['Q'] -= electron_num
+                nucl_like["HalfLife"] += " {:s}".format("*"*electron_num) # * notes for H-like, ** notes for He-like
+                self.atom_data = pd.concat([self.atom_data, nucl_like], ignore_index=True)
+            self.atom_data.to_csv("atomic_data.csv", index=False)
+            if self.verbose: print("atomic data saved")
 
     def set_cen_freq(self, cen_freq):
         '''
@@ -75,13 +111,17 @@ class Utility(object):
         '''
         element = ''.join(c for c in ion if c.isalpha())
         A, Q = map(int, ion.split(element))
-        select_A_El = (self.atom_mass['A']==A) & (self.atom_mass["Element"]==element)
+        select_A_El = (self.atom_data['A']==A) & (self.atom_data["Element"]==element)
         if not select_A_El.any():
             print("Error: ion is too rare!")
             return
-        self.index = self.atom_mass.loc[select_A_El].index[0] # index of the target ion in the lookup table
-        self.Q = Q if self.atom_mass.iloc[self.index]['Z'] >= Q else self.atom_mass.iloc[self.index]['Z'] # at most fully stripped
-        self.mass = self.atom_mass.iloc[self.index]["Mass"] - self.me * self.Q # ionic mass in u after deducting the masses of the stripped electrons
+        if Q not in self.atom_data[select_A_El]['Q'].values:
+            print("Error: ion is not bare or H-like or He-like. Change to the bare ion instead.")
+            Q = self.atom_data[select_A_El]['Q'].max()
+        self.index = self.atom_data.loc[((self.atom_data['A']==A) & (self.atom_data["Element"]==element) & (self.atom_data['Q']==Q))].index[0] # index of the target ion in the lookup table
+        self.Q = Q
+        self.mass = self.atom_data.iloc[self.index]["Mass"]
+        self.halfLife = self.atom_data.iloc[self.index]["HalfLife"]
 
     def set_gamma(self, gamma):
         '''
@@ -174,7 +214,7 @@ class Utility(object):
         print all the kinematic and spectroscopic parameters of the target ion
         '''
         print('-' * 10)
-        print("target ion\t\t{0.A:d}{0.Element:s}{1:d}+".format(self.atom_mass.iloc[self.index], self.Q))
+        print("target ion\t\t{0.A:d}{0.Element:s}{1:d}+".format(self.atom_data.iloc[self.index], self.Q))
         print("γ\t\t\t{:.6g}".format(self.gamma))
         print("β\t\t\t{:.6g}".format(self.beta))
         print("Bρ\t\t\t{:.6g} Tm".format(self.Brho))
@@ -185,6 +225,27 @@ class Utility(object):
         print("span\t\t\t{:g} kHz".format(self.span))
         print("peak location(s)\t" + ', '.join(["{:.0f}".format(item) for item in self.peak_loc]) + " kHz")
         print("harmonic number(s)\t" + ', '.join(["{:d}".format(item) for item in self.harmonic]))
+        print("half life\t\t{:s}".format(self.halfLife))
+    
+    def help(self):
+        '''
+        display all the available functions of the class: IID_Estimation
+        '''
+        print('--' * 10 + '\n')
+        print('Display all avaliable functions of the IID_Estimation\n')
+        print("Input Only:")
+        print("set_ion(ion)\n\tset the target ion, to be input in the format of AEmlementQ, e.g., 3H2")
+        print("set_cen_freq(cen_freq)\n\tset a new center frequency of the spectrum [MHz]")
+        print("set_span(span)\n\tset a new span of the spectrum [kHz]")
+        print("set_L_CSRe(L_CSRe)\n\tset the adjusted circumference of CSRe [m]")
+        print("Display the estimation result after input:")
+        print("set_energy(energy)\n\tset the kinetic energy the target ion [MeV/u]")
+        print("set_gamma(gamma)\n\tset the Lorentz factor of the target ion")
+        print("set_beta(beta)\n\tset the velocity of the target ion in unit of speed of light")
+        print("set_Brho(Brho)\n\tset the magnetic rigidity of the target ion [Tm]")
+        print("set_rev_freq(rev_freq)\n\tset the revolution frequency of the target ion [MHz]")
+        print("set_peak_loc(peak_loc, harmonic)\n\tset the peak location [kHz] of the target ion and corresponding harmonic for the calibration")
+        print('\n' + '--' * 10) 
 
 
 if __name__ == "__main__":
