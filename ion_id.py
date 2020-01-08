@@ -22,7 +22,7 @@ class IID(Utility):
         L_CSRe:     circumference of CSRe in m, default value 128.8
         '''
         self.n_peak = n_peak
-        self.sigma = 1.0e-5
+        self.sigma = 1.0e-6
         self.GUI_mode = GUI_mode
         super().__init__(cen_freq, span, L_CSRe, verbose)
         with io.StringIO() as buf:
@@ -36,7 +36,7 @@ class IID(Utility):
                 for line in lpp:
                     segment = line.strip().split(',')[0]
                     stubs = segment.split()
-                    A, element, Q = re.split("([A-Z][a-z]?)", stubs[0]+stubs[1][:-1])
+                    A, element, Q = re.split("([A-Z][a-z]?)", stubs[0]+stubs[-2][:-1])
                     buf.write(' '.join([A, element, Q, stubs[-1][1:]]) + '\n')
             buf.seek(0)
             self.fragment = pd.read_csv(buf, delim_whitespace=True, names=['A', "Element", 'Q', "Yield"])
