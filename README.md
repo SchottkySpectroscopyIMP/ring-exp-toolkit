@@ -21,6 +21,7 @@ Make sure the following requirements are fulfilled.
 ### Prerequisites
  - `Python 3`
  - `Numpy`, `Pandas`
+ - `pyqtgraph`, `pyQt5` (version >= 5.13.0) (_only if GUI is used_)
  - [atomic mass database](http://amdc.in2p3.fr/masstables/Ame2016/mass16.txt) `mass16.txt`
  - [atomic half-life database](http://amdc.in2p3.fr/nubase/nubase2016.txt) `nubase2016.txt`
  - [electron binding energy]( https://physics.nist.gov/PhysRefData/ASD/ionEnergy.html) `electron_binding_energy.csv`
@@ -28,11 +29,11 @@ Make sure the following requirements are fulfilled.
  - `LISE++` simulation files (_only if ion identification is needed_)
  - `iid_GUI.ui` ui file (_only if GUI is used_)
 
-To run the code, launch a `IPython` session or a `Jupyter` notebook and import the scripts as packages.
+You can choose to launch a `IPython` session or a `Jupyter` notebook and import the scripts as packages, alternatively, to launch the GUI in ternimal.
 Simple as that!
 
 ## Usage
-Examples are
+Examples for the common-line interface are
 ```python
 import utility as _util
 util = _util.Utility(242.9, 500) # frequency window specified by center frequency in MHz, and span in kHz
@@ -46,6 +47,7 @@ iid = _iid.IID("58Ni28.lpp", 242.9, 500) # LISE++ simulation file, center freque
 iid.calibrate_peak_loc("58Ni28", -140, 161) # identified ion, peak location in kHz within the frequency window, harmonic
 ```
 
+To launch the GUI
 ```cmd
 python iid_GUI.py
 ```
