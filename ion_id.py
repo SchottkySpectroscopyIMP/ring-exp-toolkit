@@ -29,7 +29,7 @@ class IID(Utility):
             with open(lppion, encoding='latin-1') as lpp:
                 while True:
                     line = lpp.readline().strip()
-                    if line == "[D1_DipoleSettings]":
+                    if line == "[D4_DipoleSettings]":
                         self.Brho = float(lpp.readline().strip().split()[2]) # Tm
                     elif line == "[Calculations]":
                         break
@@ -37,10 +37,16 @@ class IID(Utility):
                     segment = line.strip().split(',')[0]
                     stubs = segment.split()
                     A, element, Q = re.split("([A-Z][a-z]?)", stubs[0]+stubs[-2][:-1])
-                    buf.write(' '.join([A, element, Q, stubs[-1][1:]]) + '\n')
+                    buf.write(','.join([A, element, Q, stubs[-1][1:]]) + '\n')
             buf.seek(0)
-            self.fragment = pd.read_csv(buf, delim_whitespace=True, names=['A', "Element", 'Q', "Yield"])
-        self.fragment = pd.merge(self.fragment, self.atom_data)
+            fragment = pd.read_csv(buf, names=['A', "Element", 'Q', "Yield"])
+        fragment_unique = fragment.drop_duplicates(subset=['A', "Element", 'Q'])
+        def sum_yield(row):
+            A, el, Q = row['A'], row["Element"], row['Q']
+            idx = fragment[(fragment['A']==A) & (fragment["Element"]==el) & (fragment['Q']==Q)].index
+            return fragment.loc[idx]["Yield"].sum()
+        fragment_unique.loc[:]["Yield"] = fragment_unique.apply(sum_yield, axis=1)
+        self.fragment = pd.merge(self.ion_data,fragment_unique)
         self.calc_peak()
 
     def calc_peak(self):
@@ -59,7 +65,7 @@ class IID(Utility):
             return np.arange(np.ceil(lower_freq/x), np.floor(upper_freq/x)+1).astype(int)
         self.peak["Harmonic"] = self.peak.apply(lambda x: calc_harmonic(x["RevFreq"], lower_freq, upper_freq), axis=1)
         peak_dict_temp = self.peak.to_dict()
-        peak_dict = {'A': {}, "Element": {}, 'Q': {}, "Yield": {}, "HalfLife": {}, "RevFreq": {}, "Harmonic": {}, "PeakLoc": {}, "Weight": {}}
+        peak_dict = {'A': {}, "Element": {}, 'Q': {}, "Yield": {}, "Half-Life": {}, "RevFreq": {}, "Harmonic": {}, "PeakLoc": {}, "Weight": {}}
         ind = 0
         for index in range(len(peak_dict_temp["Harmonic"])):
             for h in peak_dict_temp["Harmonic"][index]:
@@ -77,7 +83,7 @@ class IID(Utility):
         self.peak.reset_index(drop=True, inplace=True)
         if self.GUI_mode:
             frequencyRange, ionPeaks = self.calc_gaussian_peak()
-            return frequencyRange, ionPeaks, self.peak.loc[:, ["Ion", "Yield", "HalfLife", "Harmonic", "PeakLoc", "RevFreq", "Weight"]]
+            return frequencyRange, ionPeaks, self.peak.loc[:, ["Ion", "Yield", "Half-Life", "Harmonic", "PeakLoc", "RevFreq", "Weight"]]
         else:
             self.show()
             return
@@ -112,7 +118,7 @@ class IID(Utility):
         self.index = self.fragment.loc[select_nucl].index[0] # index of the target ion in the lookup table
         self.Q = Q
         self.mass = self.fragment.iloc[self.index]["Mass"]
-        self.halfLife = self.fragment.iloc[self.index]["HalfLife"]
+        self.halfLife = self.fragment.iloc[self.index]["Half-Life"]
 
     def calibrate_Brho(self, Brho):
         '''
@@ -184,7 +190,7 @@ class IID(Utility):
         print("orbital length\t\t{:g} m".format(self.L_CSRe))
         print("Bρ\t\t\t{:.6g} Tm\n".format(self.Brho))
         print(self.peak.head(self.n_peak).to_string(index=False, justify="left",
-            columns=["Weight", "Ion", "HalfLife", "Yield", "RevFreq", "PeakLoc", "Harmonic"],
+            columns=["Weight", "Ion", "Half-Life", "Yield", "RevFreq", "PeakLoc", "Harmonic"],
             header=["Weight", " Ion", " Half-life", "Yield", "Rev.Freq.", "PeakLoc.", "Harmonic"],
             formatters=[
                 lambda x: "{:<8.2e}".format(x),

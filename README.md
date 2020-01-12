@@ -24,7 +24,7 @@ Make sure the following requirements are fulfilled.
  - `pyqtgraph`, `pyQt5` (version >= 5.13.0) (_only if GUI is used_)
  - [atomic mass database](http://amdc.in2p3.fr/masstables/Ame2016/mass16.txt) `mass16.txt`
  - [atomic half-life database](http://amdc.in2p3.fr/nubase/nubase2016.txt) `nubase2016.txt`
- - [electron binding energy]( https://physics.nist.gov/PhysRefData/ASD/ionEnergy.html) `electron_binding_energy.csv`
+ - [electronic ionization energy]( https://physics.nist.gov/PhysRefData/ASD/ionEnergy.html) `ionization.csv`
  - `IPython`/`Jupyter` (_optional_)
  - `LISE++` simulation files (_only if ion identification is needed_)
  - `iid_GUI.ui` ui file (_only if GUI is used_)

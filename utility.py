@@ -7,37 +7,36 @@ import pandas as pd
 
 class Utility(object):
     '''
-    A class for the ion estimation during a beam time
-    A useful tool to calculate the a special ion (bare/H-like/He-like)
-    It is intended to be imported, e.g., into an IPython session
-    A preparation for the ion identification of the Schottky spectrum at CSRe
+    A class encapsulating some utility methods for the quick calculation during an isochronous Schottky beam time.
+    It is a useful tool to calculate a specific ion (bare/H-like/He-like/Li-like).
+    It is intended to be imported, e.g., into an IPython session, to be used for the ion identification.
     '''
+
     c = 299792458 # speed of light in m/s
     e = 1.6021766208e-19 # elementary charge in C
     me = 5.4857990907e-4 # electron mass in u
     u2kg = 1.66053904e-27 # amount of kg per 1 u
     MeV2u = 1.073544216e-3 # amount of u per 1 MeV
+    orb_e = {0: "bare", 1: "H-like", 2: "He-like", 3: "Li-like"} # ionic charge state related to its orbital electron count
+
 
     def __init__(self, cen_freq, span, L_CSRe=128.8, verbose=True):
         '''
-        load the atomic mass dataset from disk, if any, otherwise build it and save it to disk
-        (atomic data including Mass, Half-life of all the nuclides in the Bare, H-like and, He-like ionization)
+        Load the ionic data from disk, if any, otherwise build it and save it to disk.
+        The ionic data contain masses of nuclides in the bare, H-like, He-like, Li-like, and neutral charge states.
+        Besides, the half-lives of the corresponding atoms are included as a reference.
+
         cen_freq:   center frequency of the spectrum in MHz
         span:       span of the spectrum in kHz
         L_CSRe:     circumference of CSRe in m, default value 128.8
-
-        mass data from AME2016
-        half life from NUBASE2016
-        eletron binding energy from NIST Atomic Spectra Database - Ionization Energies Form 
-        https://physics.nist.gov/PhysRefData/ASD/ionEnergy.html
         '''
         self.cen_freq = cen_freq # MHz
         self.span = span # kHz
         self.L_CSRe = L_CSRe # m
         self.verbose = verbose
         try:
-            self.atom_data = pd.read_csv("atomic_data.csv")
-            if self.verbose: print("atomic data loaded")
+            self.ion_data = pd.read_csv("ionic_data.csv")
+            if self.verbose: print("ionic data loaded")
         except OSError:
             with io.StringIO() as buf:
                 with open("./mass16.txt") as ame:
@@ -45,11 +44,15 @@ class Utility(object):
                         ame.readline()
                     for l in ame:
                         if l[106] == '#':
-                            buf.write(l[16:23] + l[11:15] + l[96:99] + l[100:106] + " estimated\n")
+                            buf.write(l[16:23] + "0 " + l[11:15] + l[96:99] + '.' + l[100:106] + " estimated\n")
                         else:
-                            buf.write(l[16:23] + l[11:15] + l[96:99] + l[100:112] + " measured\n")
+                            buf.write(l[16:23] + "0 " + l[11:15] + l[96:99] + '.' + l[100:106] + l[107:112] + " measured\n")
                 buf.seek(0) # rewind the file pointer to the beginning
-                atom_mass = pd.read_csv(buf, delim_whitespace=True, names=['A', "Element", 'Z', "Mass", "Source"])
+                atom_mass = pd.read_csv(buf, delim_whitespace=True, names=['A', "Element", 'Q', 'Z', "Mass", "Source"])
+                atom_mass.loc[atom_mass["Element"]=="Ed", "Element"] = "Nh" # Z=113
+                atom_mass.loc[atom_mass["Element"]=="Ef", "Element"] = "Mc" # Z=115
+                atom_mass.loc[atom_mass["Element"]=="Eh", "Element"] = "Ts" # Z=117
+                atom_mass.loc[atom_mass["Element"]=="Ei", "Element"] = "Og" # Z=118
             with io.StringIO() as buf:
                 with open("./nubase2016.txt") as nubase:
                     for line in nubase:
@@ -57,35 +60,39 @@ class Utility(object):
                             continue
                         stubs = line[60:78].split()
                         half_life = stubs[0].rstrip('#') if len(stubs) > 0 else "n/a"
-                        half_life += '' + stubs[1] if half_life[-1].isdigit() else ""
+                        half_life += ' ' + stubs[1] if half_life[-1].isdigit() else ''
                         buf.write(','.join([line[:3], line[4:7], half_life]) + '\n')
                 buf.seek(0)
-                nucl_life = pd.read_csv(buf, na_filter=False, names=['A', 'Z', "HalfLife"])
-            atom_data = pd.merge(atom_mass, nucl_life)
-            atom_data.loc[atom_data["Element"]=="Ed", "Element"] = "Nh" # Z=113
-            atom_data.loc[atom_data["Element"]=="Ef", "Element"] = "Mc" # Z=115
-            atom_data.loc[atom_data["Element"]=="Eh", "Element"] = "Ts" # Z=117
-            atom_data.loc[atom_data["Element"]=="Ei", "Element"] = "Og" # Z=118
-            atom_data["Mass"] /= 1e6 # masses are scaled to be in u
-            atom_data['Q'] = atom_data['Z']
-            atom_data["Mass"] -= self.me * atom_data['Q'] # ionic mass in u for bare ions
-            del atom_mass, nucl_life
-            self.atom_data = atom_data
-            bde = pd.read_csv("./electron_binding_energy.csv", encoding='utf8')
-            bde["BindingEnergy"] *= self.MeV2u *1e-3        
-            def ion_like(pre_ion, bindEn, electron_num):
-                if pre_ion["Element"] in bindEn["Element"].values:
-                    return (pre_ion["Mass"] + electron_num * self.me - bindEn[bindEn["Element"]==pre_ion["Element"]]["BindingEnergy"].values)[0]
-                else:
-                    return np.nan
-            for electron_num in [1, 2]:
-                nucl_like = atom_data[atom_data['Z'] > electron_num].reset_index(drop=True)
-                nucl_like["Mass"] = nucl_like.apply(lambda x: ion_like(x, bde, electron_num), axis=1)
-                nucl_like['Q'] -= electron_num
-                nucl_like["HalfLife"] += " {:s}".format("*"*electron_num) # * notes for H-like, ** notes for He-like
-                self.atom_data = pd.concat([self.atom_data, nucl_like], ignore_index=True)
-            self.atom_data.to_csv("atomic_data.csv", index=False)
-            if self.verbose: print("atomic data saved")
+                atom_half_life = pd.read_csv(buf, na_filter=False, names=['A', 'Z', "Half-Life"])
+            neutral = pd.merge(atom_mass, atom_half_life)
+            del atom_mass, atom_half_life
+            ioniz_eng = pd.read_csv("./ionization.csv", comment='#')
+            bare = neutral[neutral['Z']!=0].copy() # ignore neutron
+            bare['Q'] = bare['Z']
+            bare["Mass"] -= self.me*bare['Q'] - (14.4381*bare['Q']**2.39+1.55468e-6*bare['Q']**5.35)/1e6*self.MeV2u
+            h_like = bare[bare['Q']!=1].copy() # ignore isotopes of hydrogen
+            h_like['Q'] -= 1
+            h_like["Half-Life"] += " *"
+            h_like = h_like.merge(ioniz_eng, on=["Element", 'Q'])
+            h_like["Mass"] += self.me - h_like["Ionization"]/1e6*self.MeV2u
+            h_like.drop(columns="Ionization", inplace=True)
+            he_like = h_like[h_like['Q']!=1].copy() # ignore isotopes of helium
+            he_like['Q'] -= 1
+            he_like["Half-Life"] += '*'
+            he_like = he_like.merge(ioniz_eng, on=["Element", 'Q'])
+            he_like["Mass"] += self.me - he_like["Ionization"]/1e6*self.MeV2u
+            he_like.drop(columns="Ionization", inplace=True)
+            li_like = he_like[he_like['Q']!=1].copy() # ignore isotopes of lithium
+            li_like['Q'] -= 1
+            li_like["Half-Life"] += '*'
+            li_like = li_like.merge(ioniz_eng, on=["Element", 'Q'])
+            li_like["Mass"] += self.me - li_like["Ionization"]/1e6*self.MeV2u
+            li_like.drop(columns="Ionization", inplace=True)
+            self.ion_data = pd.concat([bare, h_like, he_like, li_like, neutral])
+            self.ion_data.sort_values(by=['A', 'Z', 'Q'], axis=0, inplace=True)
+            self.ion_data.reset_index(drop=True, inplace=True)
+            self.ion_data.to_csv("ionic_data.csv", index=False)
+            if self.verbose: print("ionic data saved")
 
     def set_cen_freq(self, cen_freq):
         '''
@@ -111,17 +118,15 @@ class Utility(object):
         '''
         element = ''.join(c for c in ion if c.isalpha())
         A, Q = map(int, ion.split(element))
-        select_A_El = (self.atom_data['A']==A) & (self.atom_data["Element"]==element)
+        select_A_El = (self.ion_data['A']==A) & (self.ion_data["Element"]==element)
         if not select_A_El.any():
             print("Error: ion is too rare!")
-            return
-        if Q not in self.atom_data[select_A_El]['Q'].values:
-            print("Error: ion is not bare or H-like or He-like. Change to the bare ion instead.")
-            Q = self.atom_data[select_A_El]['Q'].max()
-        self.index = self.atom_data.loc[((self.atom_data['A']==A) & (self.atom_data["Element"]==element) & (self.atom_data['Q']==Q))].index[0] # index of the target ion in the lookup table
-        self.Q = Q
-        self.mass = self.atom_data.iloc[self.index]["Mass"]
-        self.halfLife = self.atom_data.iloc[self.index]["HalfLife"]
+            raise SystemExit
+        if Q not in self.ion_data[select_A_El]['Q'].values:
+            print("Warning: ion is not found with the given charge state, change to the bare ion instead.")
+            Q = self.ion_data[select_A_El]['Q'].max()
+        self.index = self.ion_data[select_A_El & (self.ion_data['Q']==Q)].index[0] # index of the target ion in the lookup table
+        self.Q, self.mass, self.half_life = Q, self.ion_data.loc[self.index]["Mass"], self.ion_data.loc[self.index]["Half-Life"]
 
     def set_gamma(self, gamma):
         '''
@@ -214,7 +219,8 @@ class Utility(object):
         print all the kinematic and spectroscopic parameters of the target ion
         '''
         print('-' * 10)
-        print("target ion\t\t{0.A:d}{0.Element:s}{1:d}+".format(self.atom_data.iloc[self.index], self.Q))
+        print("target ion\t\t{0.A:d}{0.Element:s}{1:d}+".format(self.ion_data.iloc[self.index], self.Q))
+        print("charge state\t\t{:s}".format(self.orb_e[self.ion_data.loc[self.index]['Z']-self.Q]))
         print("γ\t\t\t{:.6g}".format(self.gamma))
         print("β\t\t\t{:.6g}".format(self.beta))
         print("Bρ\t\t\t{:.6g} Tm".format(self.Brho))
@@ -225,7 +231,7 @@ class Utility(object):
         print("span\t\t\t{:g} kHz".format(self.span))
         print("peak location(s)\t" + ', '.join(["{:.0f}".format(item) for item in self.peak_loc]) + " kHz")
         print("harmonic number(s)\t" + ', '.join(["{:d}".format(item) for item in self.harmonic]))
-        print("half life\t\t{:s}".format(self.halfLife))
+        print("atomic half-life\t{:s}".format(self.half_life))
     
     def help(self):
         '''

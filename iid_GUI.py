@@ -88,7 +88,7 @@ class IID_GUI(QMainWindow):
 
         # ion information list
         self.ionTable.setSortingEnabled(True)
-        self.QTable_setModel(pd.DataFrame(columns=["Ion", "Yield", "HalfLife", "Harmonic", "PeakLoc", "RevFreq", "Weight"]), self.ionTable)
+        self.QTable_setModel(pd.DataFrame(columns=["Ion", "Yield", "Half-Life", "Harmonic", "PeakLoc", "RevFreq", "Weight"]), self.ionTable)
 
         # file list
         self.mFileList = QFileSystemModel(self)
@@ -191,7 +191,7 @@ class IID_GUI(QMainWindow):
 
         # build connection with ion-types (bare, H-like, He-like)
         def check_ionType():
-            self.display_ions = pd.DataFrame(columns=["Ion", "Yield", "HalfLife", "Harmonic", "PeakLoc", "RevFreq", "Weight"])
+            self.display_ions = pd.DataFrame(columns=["Ion", "Yield", "Half-Life", "Harmonic", "PeakLoc", "RevFreq", "Weight"])
             if self.bareCheck.isChecked():
                 self.display_ions = pd.concat([self.display_ions, self.bare_ions])
             if self.HLikeCheck.isChecked():
@@ -259,17 +259,17 @@ class IID_GUI(QMainWindow):
         
         def load_file_ready():
             # check the bare ions
-            self.bare_ions = self.peak_list[self.peak_list["HalfLife"].str.match("([\w.]+)$")]
+            self.bare_ions = self.peak_list[self.peak_list["Half-Life"].str.match("([\w.]+ ?[\w.]+)$")]
             self.QCheckBox_InputStyle(self.bareCheck)
             self.bareCheck.setChecked(True)
             # check the H-like ions
-            if True in self.peak_list["HalfLife"].str.match("([\w.]+)[\s][\*]$").values:
-                self.H_like_ions = self.peak_list[self.peak_list["HalfLife"].str.match("([\w.]+)[\s][\*]$")]
+            if True in self.peak_list["Half-Life"].str.match("([\w.]+ ?[\w.]+) [\*]$").values:
+                self.H_like_ions = self.peak_list[self.peak_list["Half-Life"].str.match("([\w.]+ ?[\w.]+) [\*]$")]
                 self.QCheckBox_InputStyle(self.HLikeCheck)
                 self.HLikeCheck.setChecked(True)
             # check the He-like ions
-            if True in self.peak_list["HalfLife"].str.match("([\w.]+)[\s][\*][\*]$").values:
-                self.He_like_ions = self.peak_list[self.peak_list["HalfLife"].str.match("([\w.]+)[\s][\*][\*]$")]
+            if True in self.peak_list["Half-Life"].str.match("([\w.]+ ?[\w.]+) [\*]{2}$").values:
+                self.He_like_ions = self.peak_list[self.peak_list["Half-Life"].str.match("([\w.]+ ?[\w.]+) [\*]{2}$")]
                 self.QCheckBox_InputStyle(self.HeLikeCheck)
                 self.HeLikeCheck.setChecked(True)
             self.statusBar().showMessage("Selected file has been loaded!")
@@ -307,7 +307,7 @@ class IID_GUI(QMainWindow):
             a[a < lim] = lim
             return a
         peak_select_ions = select_ions.apply(lambda x: calc_ion_peak(x), axis=1)
-        return select_ions.loc[:, ["Ion", "Yield", "HalfLife", "Harmonic", "PeakLoc", "RevFreq", "Weight"]], peak_select_ions
+        return select_ions.loc[:, ["Ion", "Yield", "Half-Life", "Harmonic", "PeakLoc", "RevFreq", "Weight"]], peak_select_ions
 
     def display(self, ion_table, emphasized_ions):
         '''
